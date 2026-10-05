@@ -1,0 +1,1903 @@
+diff --git a/SVIRI_STATUS.md b/SVIRI_STATUS.md
+new file mode 100644
+index 0000000..541fd4a
+--- /dev/null
++++ b/SVIRI_STATUS.md
+@@ -0,0 +1,63 @@
++# swiryyyyX — код для наступної збірки
++
++Це пакет змін до Telegram X, а не готовий APK. Назва застосунку: **swiryyyyX**. Android, особисте користування.
++
++## Реалізовано в коді
++
++- Окреме локальне сховище прихованих чатів для кожного акаунта. Масове приховування записується однією операцією, без часткової зміни стану після помилки запису.
++- «Hide chat» у меню виділених чатів; звичайний розділ «Приховані чати» у налаштуваннях без PIN. Там можна відкрити чат або повернути його до списку.
++- Фільтрація списків, папок, результатів пошуку чатів і повідомлень, списку контактів для вибору переписки та прев’ю архіву.
++- Локальна проєкція лічильників основного списку, архіву, папок і значка застосунку без зміни серверного стану. Після запуску запитується відсутня метаінформація прихованих чатів, а не їхня історія.
++- Приховані сповіщення й звук, очищення Android shortcuts та повторна перевірка перед показом сповіщення після завантаження медіа.
++- Відкриття прихованих чатів через звичайні посилання обмежене; дозволене відкриття з налаштувань і продовження вже відкритої переписки.
++- Початкова порція до 50 чатів, довантаження з урахуванням прихованих рядків, об’єднання одночасних запитів прокручування. Тимчасові мережеві помилки мають затримку повтору 1–30 секунд і не позначають список завершеним.
++- Прибирання підписок після закриття списку та знищення пошуку.
++- Початкова темна палітра swiryyyyX за скриншотами Nicegram: майже чорне тло, темні поверхні, сині акценти, округлені повідомлення. Вона є типовою темною темою.
++- Шаблон конфігурації з назвою swiryyyyX та окремим package ID ua.swiryyyyx.client; сценарій запуску Windows-збірки.
++
++Приховування діє лише в цьому клієнті. Інші Telegram-клієнти бачать чат. Це функція інтерфейсу, без парольного захисту. Дані та серверні налаштування сповіщень не видаляються.
++
++## Що ще потрібно завершити та перевірити
++
++- Повне компонування Nicegram: постійний округлений пошук, капсульна нижня навігація, заголовок переписки. Палітра не означає завершений дизайн.
++- Середня вкладка нижньої навігації має відкривати власні налаштування swiryyyyX, як погоджено користувачем. Вона ще не реалізована.
++- Власна іконка застосунку.
++- Повна компіляція Android і перевірка зі справжнім TDLib: нові повідомлення, зміна папок, повторний вхід, декілька акаунтів, сповіщення при закритому застосунку, сторонні точки відкриття/пересилання.
++- Замір часу запуску, пам’яті, прокручування й пропущених кадрів на 400 чатах. Підвищення швидкості ще не підтверджене замірами.
++- Частковий кеш під час запуску може тимчасово давати неповну локальну проєкцію лічильників до надходження метаданих прихованих чатів; це потребує перевірки на телефоні.
++
++## Виконані перевірки
++
++```bash
++python3 tests/sviri/run_checks.py
++python3 tests/sviri/check_slice.py
++```
++
++Пройшли: збереження/перезапуск, ізоляція акаунтів, помилки запису, одночасні операції для 400 чатів, масова атомарна операція, лічильники muted/marked/unknown та переповнення, затримки мережевих повторів. Справжній TdlibChatListSlice перевірено з імітаціями залежностей: порції, hide/unhide, порядок, об’єднання запитів, очищення підписок. Синтаксис змінених Java-файлів, XML і назви кольорів/властивостей теми також перевірено.
++
++Це не перевірка Android-типів і не компіляція APK. У поточному середовищі немає потрібних JDK 25, Android SDK/NDK та підготовлених native-підмодулів. Автоматичне завантаження Gradle не вдалося; окремо отриманий архів також не пройшов перевірку ZIP. Windows-сценарій тут не виконувався.
++
++## Застосування змін на комп’ютері
++
++База: https://github.com/TGX-Android/Telegram-X
++Commit: b5f81630f070d1100673029682914ff3672769b0
++
++```bash
++git clone https://github.com/TGX-Android/Telegram-X.git swiryyyyX
++cd swiryyyyX
++git checkout b5f81630f070d1100673029682914ff3672769b0
++git apply --check /path/to/swiryyyyX.patch
++git apply /path/to/swiryyyyX.patch
++```
++
++На Windows підготувати JDK 25, Git/LFS, Android SDK та MSYS2 UCRT64 за README базового репозиторію. Скопіювати local.properties.swiryyyyX.example у local.properties, заповнити локальні шляхи та власні Telegram API credentials. Не використовувати чужі API credentials і не публікувати hash або ключ підпису.
++
++Після підготовки:
++
++```powershell
++.\build-swiryyyyX.ps1
++```
++
++Сценарій перевіряє обов’язкові поля й Java, отримує підмодулі та запускає assembleLatestUniversalDebug. Конфігурацію Firebase/google-services.json потрібно узгодити з власним package ID за README upstream; сценарій її не створює. Помилки справжньої Android-збірки потрібно усунути до встановлення APK.
++
++У ZIP є patch, копії змінених файлів і ця інструкція. Це не повний репозиторій і не інсталяційний файл. Застосовувати зміни саме до вказаного commit. Зберігати ліцензію GPL-3.0 та повідомлення оригінального проєкту.
+diff --git a/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java b/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
+index e145906..e3d3a5e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
++++ b/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
+@@ -236,6 +236,14 @@ public class SearchManager {
+     this.listener = listener;
+   }
+ 
++  private final org.thunderdog.challegram.telegram.TdlibSettingsManager.HiddenChatsListener hiddenChatsListener = this::onHiddenChatChanged;
++
++  private void onHiddenChatChanged (long chatId) {
++    tdlib.ui().post(() -> {
++      if (isOpen) reloadSearchResults(lastChatList);
++    });
++  }
++
+   // Public API
+ 
+   public boolean isOpen () {
+@@ -253,6 +261,7 @@ public class SearchManager {
+   public void onOpen (final @Nullable TdApi.ChatList chatList) {
+     if (!isOpen) {
+       isOpen = true;
++      tdlib.settings().addHiddenChatsListener(hiddenChatsListener);
+       listener.onOpen();
+       performSearch(chatList, "", FORCE_MODE_TOP);
+     }
+@@ -265,6 +274,7 @@ public class SearchManager {
+   public void onClose (@Nullable TdApi.ChatList chatList) {
+     if (isOpen) {
+       isOpen = false;
++      tdlib.settings().removeHiddenChatsListener(hiddenChatsListener);
+       listener.onClose();
+       performSearch(chatList, "", FORCE_MODE_NONE);
+       addRecentlyFoundChat(null);
+@@ -273,6 +283,12 @@ public class SearchManager {
+ 
+   private boolean isPrepared;
+ 
++  public void performDestroy () {
++    isOpen = false;
++    tdlib.settings().removeHiddenChatsListener(hiddenChatsListener);
++    incrementContextId();
++  }
++
+   public void onPrepare (@NonNull TdApi.ChatList chatList, @NonNull String initialQuery) {
+     if (!isPrepared) {
+       isPrepared = true;
+@@ -503,9 +519,10 @@ public class SearchManager {
+     final boolean noChannels = (searchFlags & FLAG_NO_CHANNELS) != 0;
+     final boolean noGroups = (searchFlags & FLAG_NO_GROUPS) != 0;
+     final boolean needCustomFilter = (searchFlags & FLAG_CUSTOM_FILTER) != 0 && listener != null;
+-    if (excludeChatIds != null || isFiltered(searchFlags)) {
++    if (excludeChatIds != null || isFiltered(searchFlags) || tdlib.settings().hasHiddenChats()) {
+       int count = 0;
+       for (TdApi.Chat chat : chats) {
++        if (tdlib.settings().isChatHidden(chat.id)) continue;
+         if (excludeChatIds != null && ArrayUtils.indexOf(excludeChatIds, chat.id) != -1) {
+           continue;
+         }
+@@ -597,7 +614,7 @@ public class SearchManager {
+                   } else {
+                     TdApi.User user = tdlib.cache().user(selfUserId);
+                     if (user != null) {
+-                      foundChats.add(new TGFoundChat(tdlib, user, query, true));
++                      if (!tdlib.settings().isChatHidden(ChatId.fromUserId(user.id))) foundChats.add(new TGFoundChat(tdlib, user, query, true));
+                       foundChatIds.append(selfChatId);
+                     }
+                   }
+@@ -618,7 +635,7 @@ public class SearchManager {
+             foundChats = new ArrayList<>(userIds.length);
+             for (TdApi.User user : users) {
+               if (user != null && foundChatIds.indexOf(ChatId.fromUserId(user.id)) == -1) {
+-                foundChats.add(new TGFoundChat(tdlib, user, query, false));
++                if (!tdlib.settings().isChatHidden(ChatId.fromUserId(user.id))) foundChats.add(new TGFoundChat(tdlib, user, query, false));
+               }
+             }
+             break;
+@@ -1011,7 +1028,7 @@ public class SearchManager {
+             for (TdApi.Message message : foundMessages.messages) {
+               if (chat == null || chat.id != message.chatId)
+                 chat = tdlib.chat(message.chatId);
+-              if (listener.filterMessageSearchResultSource(chat)) {
++              if (!tdlib.settings().isChatHidden(message.chatId) && listener.filterMessageSearchResultSource(chat)) {
+                 foundMessageList.add(new TGFoundMessage(tdlib, chatList, chat, message, query));
+               }
+             }
+diff --git a/app/src/main/java/org/thunderdog/challegram/data/TGChat.java b/app/src/main/java/org/thunderdog/challegram/data/TGChat.java
+index 52ec143..069f49e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/data/TGChat.java
++++ b/app/src/main/java/org/thunderdog/challegram/data/TGChat.java
+@@ -387,7 +387,7 @@ public class TGChat implements TdlibStatusManager.HelperTarget, ContentPreview.R
+ 
+   private int getTotalUnreadCount () {
+     if (isArchive()) {
+-      TdlibCounter counter = tdlib.getCounter(ChatPosition.CHAT_LIST_ARCHIVE);
++      TdlibCounter counter = tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE);
+       int unreadCount = counter.chatCount;
+       int markedAsUnreadCount = counter.markedAsUnreadCount;
+       unreadCount -= markedAsUnreadCount;
+@@ -872,7 +872,7 @@ public class TGChat implements TdlibStatusManager.HelperTarget, ContentPreview.R
+ 
+   public boolean notificationsEnabled () {
+     if (isArchive()) {
+-      TdlibCounter counter = tdlib.getCounter(ChatPosition.CHAT_LIST_ARCHIVE);
++      TdlibCounter counter = tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE);
+       return counter.chatUnmutedCount > 0;
+     } else {
+       return tdlib.chatNotificationsEnabled(chat);
+@@ -1312,7 +1312,7 @@ public class TGChat implements TdlibStatusManager.HelperTarget, ContentPreview.R
+     if (isArchive()) {
+       List<TextEntity> entities = new ArrayList<>();
+       StringBuilder b = new StringBuilder();
+-      archive.iterate(chat -> {
++      archive.iterateVisible(chat -> {
+         if (b.length() > 0) {
+           b.append(Lang.getConcatSeparator());
+         }
+@@ -1328,7 +1328,7 @@ public class TGChat implements TdlibStatusManager.HelperTarget, ContentPreview.R
+         b.append(Lang.plural(R.string.xOtherChatTitles, remainingCount));
+       });
+       if (b.length() == 0) {
+-        b.append(Lang.pluralBold(R.string.xChats, archive.totalCount()));
++        b.append(Lang.pluralBold(R.string.xChats, Math.max(0, tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE).totalChatCount)));
+       }
+       setTextValue(b.toString(), !entities.isEmpty() ? entities.toArray(new TextEntity[0]) : null, false);
+       setPrefix();
+diff --git a/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java b/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java
+index d993d4f..e99b5cb 100644
+--- a/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java
++++ b/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java
+@@ -1153,6 +1153,7 @@ public abstract class TelegramViewController<T> extends ViewController<T> {
+   public void destroy () {
+     super.destroy();
+     if (chatSearchManager != null) {
++      chatSearchManager.performDestroy();
+       TGLegacyManager.instance().removeEmojiListener(chatSearchAdapter);
+       Views.destroyRecyclerView(chatSearchView);
+     }
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java b/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java
+new file mode 100644
+index 0000000..7d6a11e
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java
+@@ -0,0 +1,20 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++/** Back off transient chat-list errors without treating them as end of list. */
++public final class ChatLoadRetry {
++  private int consecutiveFailures;
++  private long retryAt;
++
++  public boolean canRequest (long uptimeMillis) { return uptimeMillis >= retryAt; }
++
++  public void failed (long uptimeMillis) {
++    consecutiveFailures = Math.min(6, consecutiveFailures + 1);
++    retryAt = uptimeMillis + Math.min(30000L, 1000L << (consecutiveFailures - 1));
++  }
++
++  public void succeeded () {
++    consecutiveFailures = 0;
++    retryAt = 0;
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java b/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java
+new file mode 100644
+index 0000000..3145a1b
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java
+@@ -0,0 +1,74 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import java.util.HashSet;
++import java.util.Set;
++
++/** Local chat visibility. One instance belongs to one Telegram account. */
++public final class HiddenChatStore {
++  public interface Storage {
++    long[] read ();
++    void write (long[] chatIds);
++  }
++
++  private final Storage storage;
++  private volatile Snapshot hidden;
++
++  public HiddenChatStore (Storage storage) {
++    this.storage = storage;
++    Set<Long> initial = new HashSet<>();
++    long[] saved = storage.read();
++    if (saved != null) {
++      for (long chatId : saved) {
++        if (chatId != 0) initial.add(chatId);
++      }
++    }
++    hidden = new Snapshot(initial);
++  }
++
++  public boolean contains (long chatId) {
++    return hidden.ids.contains(chatId);
++  }
++
++  public boolean isEmpty () {
++    return hidden.ids.isEmpty();
++  }
++
++  public long[] chatIds () {
++    return hidden.sorted.clone();
++  }
++
++  public boolean setHidden (long chatId, boolean value) {
++    return setHidden(new long[] {chatId}, value).length != 0;
++  }
++
++  public synchronized long[] setHidden (long[] chatIds, boolean value) {
++    Set<Long> updated = new HashSet<>(hidden.ids);
++    Set<Long> changed = new HashSet<>();
++    for (long chatId : chatIds) {
++      if (chatId != 0 && (value ? updated.add(chatId) : updated.remove(chatId))) changed.add(chatId);
++    }
++    if (changed.isEmpty()) return new long[0];
++    Snapshot snapshot = new Snapshot(updated);
++    storage.write(snapshot.sorted.clone());
++    hidden = snapshot;
++    return toArray(changed);
++  }
++
++  private static final class Snapshot {
++    final Set<Long> ids;
++    final long[] sorted;
++    Snapshot (Set<Long> ids) {
++      this.ids = java.util.Collections.unmodifiableSet(ids);
++      this.sorted = toArray(ids);
++    }
++  }
++
++  private static long[] toArray (Set<Long> ids) {
++    long[] result = new long[ids.size()];
++    int index = 0;
++    for (long id : ids) result[index++] = id;
++    java.util.Arrays.sort(result);
++    return result;
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/HiddenCounterProjection.java b/app/src/main/java/org/thunderdog/challegram/telegram/HiddenCounterProjection.java
+new file mode 100644
+index 0000000..40aa890
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/HiddenCounterProjection.java
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++/** Subtract local hidden-chat contributions without changing server counters. */
++public final class HiddenCounterProjection {
++  public static final int TOTAL = 0, CHATS = 1, UNMUTED_CHATS = 2,
++    MARKED = 3, UNMUTED_MARKED = 4, MESSAGES = 5, UNMUTED_MESSAGES = 6;
++  private final long[] hidden = new long[7];
++
++  public void add (int unreadMessages, boolean markedUnread, boolean unmuted) {
++    hidden[TOTAL]++;
++    if (unreadMessages > 0 || markedUnread) {
++      hidden[CHATS]++;
++      if (unmuted) hidden[UNMUTED_CHATS]++;
++    }
++    if (markedUnread) {
++      hidden[MARKED]++;
++      if (unmuted) hidden[UNMUTED_MARKED]++;
++    }
++    hidden[MESSAGES] += Math.max(0, unreadMessages);
++    if (unmuted) hidden[UNMUTED_MESSAGES] += Math.max(0, unreadMessages);
++  }
++
++  public int visible (int field, int serverValue) {
++    // -1 means the server count is not known yet, not an empty list.
++    return serverValue < 0 ? serverValue : (int) Math.max(0L, (long) serverValue - hidden[field]);
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
+index 11c4bfb..270b91e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
+@@ -494,6 +494,69 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     return counter;
+   }
+ 
++  /** Local display counters. Raw TDLib counters remain untouched. */
++  @NonNull
++  public TdlibCounter getVisibleCounter (@NonNull TdApi.ChatList chatList) {
++    synchronized (dataLock) {
++      TdlibCounter raw = getCounter(chatList);
++      HiddenCounterProjection projection = new HiddenCounterProjection();
++      String listKey = TD.makeChatListKey(chatList);
++      for (long chatId : settings().hiddenChatIds()) {
++        TdApi.Chat chat = chats.get(chatId);
++        if (chat == null) continue;
++        boolean belongs = false;
++        if (chat.chatLists != null) {
++          for (TdApi.ChatList membership : chat.chatLists) {
++            if (listKey.equals(TD.makeChatListKey(membership))) { belongs = true; break; }
++          }
++        }
++        if (!belongs && chat.positions != null) {
++          for (TdApi.ChatPosition position : chat.positions) {
++            if (position.order != 0 && listKey.equals(TD.makeChatListKey(position.list))) { belongs = true; break; }
++          }
++        }
++        if (belongs) projection.add(chat.unreadCount, chat.isMarkedAsUnread, chatNotificationsEnabled(chat));
++      }
++      return new TdlibCounter(
++        projection.visible(HiddenCounterProjection.TOTAL, raw.totalChatCount),
++        projection.visible(HiddenCounterProjection.CHATS, raw.chatCount),
++        projection.visible(HiddenCounterProjection.UNMUTED_CHATS, raw.chatUnmutedCount),
++        projection.visible(HiddenCounterProjection.MARKED, raw.markedAsUnreadCount),
++        projection.visible(HiddenCounterProjection.UNMUTED_MARKED, raw.markedAsUnreadUnmutedCount),
++        projection.visible(HiddenCounterProjection.MESSAGES, raw.messageCount),
++        projection.visible(HiddenCounterProjection.UNMUTED_MESSAGES, raw.messageUnmutedCount));
++    }
++  }
++
++  @TdlibThread
++  public void refreshLocalVisibilityCounters () {
++    ensureTdlibThread();
++    Map<String, TdApi.ChatList> lists = new HashMap<>();
++    lists.put(TD.makeChatListKey(ChatPosition.CHAT_LIST_MAIN), ChatPosition.CHAT_LIST_MAIN);
++    lists.put(TD.makeChatListKey(ChatPosition.CHAT_LIST_ARCHIVE), ChatPosition.CHAT_LIST_ARCHIVE);
++    synchronized (dataLock) {
++      for (TdlibChatList list : chatLists.values()) {
++        lists.put(TD.makeChatListKey(list.chatList()), list.chatList());
++      }
++    }
++    for (TdApi.ChatList list : lists.values()) {
++      TdlibCounter counter = getVisibleCounter(list);
++      if (counter.chatCount < 0 && counter.messageCount < 0) continue;
++      if (counter.chatCount >= 0) account().storeCounter(list, counter, true);
++      if (counter.messageCount >= 0) account().storeCounter(list, counter, false);
++      listeners().notifyChatCountersChanged(list, counter, true, counter.totalChatCount, counter.chatCount, counter.chatUnmutedCount);
++      listeners().notifyMessageCountersChanged(list, counter, counter.messageCount, counter.messageUnmutedCount);
++      ui().sendMessage(ui().obtainMessage(MSG_ACTION_DISPATCH_UNREAD_COUNTER, getUnreadBadgeCount(), getUnreadBadge().isMuted() ? 1 : 0, list));
++    }
++    // The manager recalculates badges from the persisted display counters.
++    context.resetBadge(false);
++  }
++
++  @TdlibThread
++  private void refreshHiddenChatCounters (long chatId) {
++    if (settings().isChatHidden(chatId)) refreshLocalVisibilityCounters();
++  }
++
+   private int installedStickerSetLimit = 200;
+ 
+   private int[] favoriteStickerIds;
+@@ -1470,6 +1533,15 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+   private void onPerformStartup () {
+     Log.i("Performing account startup for accountId:%d, isAfterRestart:%b", accountId, startupPerformed);
+     listeners().performStartup(startupPerformed);
++    if (!startupPerformed) {
++      for (long chatId : settings().hiddenChatIds()) {
++        if (chat(chatId) == null) {
++          send(new TdApi.GetChat(chatId), (chat, error) -> {
++            if (error == null) refreshLocalVisibilityCounters();
++          });
++        }
++      }
++    }
+     startupPerformed = true;
+   }
+ 
+@@ -7778,6 +7850,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+         chatList.onUpdateNewChat(update.chat);
+       }
+     }
++    refreshHiddenChatCounters(update.chat.id);
+   }
+ 
+   public void refreshChatState (long chatId) {
+@@ -7897,6 +7970,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       listChanges = setChatPositions(chat, update.positions);
+     }
+     listeners.updateChatLastMessage(update, listChanges);
++    refreshHiddenChatCounters(update.chatId);
+   }
+ 
+   public static int CHAT_MARKED_AS_UNREAD = -1;
+@@ -8092,6 +8166,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     }
+     if (chatListChange != null) {
+       listeners.updateChatPosition(update, chatListChange);
++    refreshHiddenChatCounters(update.chatId);
+     }
+   }
+ 
+@@ -8119,6 +8194,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       chat.chatLists = list.toArray(new TdApi.ChatList[0]);
+     }
+     listeners.updateChatAddedToList(update);
++    refreshHiddenChatCounters(update.chatId);
+   }
+ 
+   @TdlibThread
+@@ -8145,6 +8221,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       chat.chatLists = ArrayUtils.removeElement(oldChatLists, foundIndex, new TdApi.ChatList[oldChatLists.length - 1]);
+     }
+     listeners.updateChatRemovedFromList(update);
++    refreshHiddenChatCounters(update.chatId);
+   }
+ 
+   @TdlibThread
+@@ -8337,6 +8414,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       chatLists = chatListsImpl(chat.positions);
+     }
+     listeners.updateChatReadInbox(update, availabilityChanged, chat, chatLists);
++    refreshHiddenChatCounters(update.chatId);
+   }
+ 
+   @TdlibThread
+@@ -8477,6 +8555,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     }
+ 
+     listeners.updateChatIsMarkedAsUnread(update);
++    refreshHiddenChatCounters(update.chatId);
+   }
+ 
+   @TdlibThread
+@@ -8845,12 +8924,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+ 
+     listeners.updateNotificationSettings(update);
+     notificationManager.onUpdateNotificationSettings(update, chatId, oldNotificationSettings);
++    refreshHiddenChatCounters(chatId);
+   }
+ 
+   @TdlibThread
+   private void updateNotificationSettings (TdApi.UpdateScopeNotificationSettings update) {
+     listeners.updateNotificationSettings(update);
+     notificationManager.onUpdateNotificationSettings(update);
++    if (settings().hasHiddenChats()) refreshLocalVisibilityCounters();
+   }
+ 
+   @TdlibThread
+@@ -9490,9 +9571,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     counter.messageCount = unreadMessageCount;
+     counter.messageUnmutedCount = unreadUnmutedCount;
+ 
+-    account().storeCounter(chatList, counter, false);
++    TdlibCounter visible = getVisibleCounter(chatList);
++    account().storeCounter(chatList, visible, false);
+     context.incrementBadgeCounters(chatList, unreadMessageCount - oldUnreadCount, unreadUnmutedCount - oldUnreadUnmutedCount, false);
+-    listeners().notifyMessageCountersChanged(chatList, counter, unreadMessageCount, unreadUnmutedCount);
++    listeners().notifyMessageCountersChanged(chatList, visible, visible.messageCount, visible.messageUnmutedCount);
+ 
+     return true;
+   }
+@@ -9511,9 +9593,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     int oldTotalChatCount = counter.totalChatCount;
+ 
+     if (counter.setChatCounters(totalCount, unreadChatCount, unreadUnmutedCount, markedAsUnreadCount, markedAsUnreadUnmutedCount)) {
+-      account().storeCounter(chatList, counter, true);
++      TdlibCounter visible = getVisibleCounter(chatList);
++      account().storeCounter(chatList, visible, true);
+       context.incrementBadgeCounters(chatList, unreadChatCount - oldUnreadCount, unreadUnmutedCount - oldUnreadUnmutedCount, true);
+-      listeners().notifyChatCountersChanged(chatList, counter, (totalCount > 0) != (oldTotalChatCount > 0), totalCount, unreadChatCount, unreadUnmutedCount);
++      listeners().notifyChatCountersChanged(chatList, visible, (totalCount > 0) != (oldTotalChatCount > 0), visible.totalChatCount, visible.chatCount, visible.chatUnmutedCount);
+       return true;
+     }
+ 
+@@ -9528,7 +9611,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+ 
+   @AnyThread
+   public TdlibCounter getMainCounter () {
+-    return getCounter(ChatPosition.CHAT_LIST_MAIN);
++    return getVisibleCounter(ChatPosition.CHAT_LIST_MAIN);
+   }
+ 
+   @AnyThread
+@@ -9548,7 +9631,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+ 
+   @AnyThread
+   public boolean hasUnreadChats (@NonNull TdApi.ChatList chatList) {
+-    return getCounter(chatList).chatCount > 0;
++    return getVisibleCounter(chatList).chatCount > 0;
+   }
+ 
+   @AnyThread
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
+index b2a472d..864eed4 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
+@@ -31,7 +31,7 @@ public class TdlibBadgeCounter {
+   }
+ 
+   boolean reset (Tdlib tdlib) {
+-    return reset(tdlib.getCounter(ChatPosition.CHAT_LIST_MAIN), tdlib.getCounter(ChatPosition.CHAT_LIST_ARCHIVE));
++    return reset(tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_MAIN), tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE));
+   }
+ 
+   boolean reset (TdlibAccount account) {
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatList.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatList.java
+index 45bf7fd..6d43b89 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatList.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatList.java
+@@ -81,6 +81,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+   private final TdApi.ChatList chatList;
+   private final ArrayList<Entry> list = new ArrayList<>();
+   private final List<Runnable> onLoadMore = new ArrayList<>();
++  private final ChatLoadRetry loadRetry = new ChatLoadRetry();
+   private final List<RunnableData<TdApi.Chat>> perChatCallbacks = new ArrayList<>();
+ 
+   private @State int state = State.END_NOT_REACHED;
+@@ -126,7 +127,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+   // State API
+ 
+   public boolean canLoad () {
+-    return state == State.END_NOT_REACHED;
++    return state == State.END_NOT_REACHED && loadRetry.canRequest(android.os.SystemClock.uptimeMillis());
+   }
+ 
+   public TdApi.ChatList chatList () {
+@@ -183,6 +184,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+   public boolean hasUnreadMentions () {
+     synchronized (list) {
+       for (Entry entry : list) {
++        if (tdlib.settings().isChatHidden(entry.chat.id)) continue;
+         if (entry.chat.unreadMentionCount > 0)
+           return true;
+       }
+@@ -193,6 +195,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+   public boolean hasUnreadReactions () {
+     synchronized (list) {
+       for (Entry entry : list) {
++        if (tdlib.settings().isChatHidden(entry.chat.id)) continue;
+         if (entry.chat.unreadReactionCount > 0)
+           return true;
+       }
+@@ -203,6 +206,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+   public boolean hasScheduledMessages () {
+     synchronized (list) {
+       for (Entry entry : list) {
++        if (tdlib.settings().isChatHidden(entry.chat.id)) continue;
+         if (entry.chat.hasScheduledMessages)
+           return true;
+       }
+@@ -213,6 +217,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+   public boolean hasFailedMessages () {
+     synchronized (list) {
+       for (Entry entry : list) {
++        if (tdlib.settings().isChatHidden(entry.chat.id)) continue;
+         if (TD.isFailed(entry.chat.lastMessage))
+           return true;
+       }
+@@ -224,6 +229,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+     synchronized (list) {
+       int maxDate = 0;
+       for (Entry entry : list) {
++        if (tdlib.settings().isChatHidden(entry.chat.id)) continue;
+         if (entry.chat.lastMessage != null) {
+           maxDate = Math.max(entry.chat.lastMessage.date, maxDate);
+           if (!ChatPosition.isPinned(entry.chat, chatList))
+@@ -255,6 +261,14 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+     }
+   }
+ 
++  /** Visible preview entries; raw list iteration stays available to TDLib logic. */
++  public void iterateVisible (RunnableData<TdApi.Chat> callback, int limit, RunnableInt limitExceededCallback) {
++    List<Entry> snapshot = listCopy(chat -> !tdlib.settings().isChatHidden(chat.id));
++    int shown = Math.min(Math.max(0, limit), snapshot.size());
++    for (int i = 0; i < shown; i++) callback.runWithData(snapshot.get(i).chat);
++    if (snapshot.size() > shown) limitExceededCallback.runWithInt(snapshot.size() - shown);
++  }
++
+   // Load API
+ 
+   @AnyThread
+@@ -293,7 +307,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+       @Override
+       public void run () {
+         int count = count(filter);
+-        if (isEndReached() || count >= minCount) {
++        if (isEndReached() || count >= minCount || (!canLoad() && state != State.LOADING)) {
+           if (after != null) {
+             after.run();
+           }
+@@ -311,7 +325,7 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+       tdlib.runOnTdlibThread(() -> loadMore(limit, after));
+       return;
+     }
+-    if (state == State.END_REACHED) {
++    if (state == State.END_REACHED || !loadRetry.canRequest(android.os.SystemClock.uptimeMillis())) {
+       if (after != null) {
+         after.run();
+       }
+@@ -325,7 +339,14 @@ public final class TdlibChatList implements Comparator<TdlibChatList.Entry> {
+     }
+     setState(State.LOADING);
+     tdlib.client().send(new TdApi.LoadChats(chatList, limit), result -> {
+-      boolean endReached = result.getConstructor() == TdApi.Error.CONSTRUCTOR;
++      boolean isError = result.getConstructor() == TdApi.Error.CONSTRUCTOR;
++      boolean endReached = isError && ((TdApi.Error) result).code == 404;
++      if (isError && !endReached) {
++        loadRetry.failed(android.os.SystemClock.uptimeMillis());
++        Log.w("Chat list load failed; will retry after backoff: %s", ((TdApi.Error) result).message);
++      } else {
++        loadRetry.succeeded();
++      }
+       setState(endReached ? State.END_REACHED : State.END_NOT_REACHED);
+       if (!onLoadMore.isEmpty()) {
+         List<Runnable> callbacks = new ArrayList<>(onLoadMore);
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
+index 7226964..3017bc6 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
+@@ -77,7 +77,7 @@ public final class TdlibChatListSlice implements Destroyable {
+   TdlibChatListSlice (Tdlib tdlib, TdlibChatList chatList, Filter<TdApi.Chat> filter, boolean keepPositions, @Nullable Modifier modifier) {
+     this.tdlib = tdlib;
+     this.sourceList = chatList;
+-    this.filter = filter;
++    this.filter = chat -> !tdlib.settings().isChatHidden(chat.id) && (filter == null || filter.accept(chat));
+     this.keepPositions = keepPositions;
+     this.haveCustomModifications = keepPositions;
+     this.modifier = modifier;
+@@ -261,6 +261,16 @@ public final class TdlibChatListSlice implements Destroyable {
+       public void onChatListItemChanged (TdlibChatList chatList, TdApi.Chat chat, int changeType) {
+         ensureTdlibThreadAndList(chatList);
+         final int existingIndex = indexOfChat(chat.id);
++        if (existingIndex != -1 && !filter.accept(chat)) {
++          filteredList.remove(existingIndex);
++          if (existingIndex < displayCount) {
++            subListener.onChatRemoved(chatList, chat, existingIndex, new Tdlib.ChatChange(ChatPosition.findPosition(chat, chatList.chatList()), Tdlib.ChatChange.ALL));
++            displayCount--;
++            dispatchChats(ChangeFlags.ITEM_REMOVED);
++            subListener.onChatListChanged(chatList, ChangeFlags.ITEM_REMOVED);
++          }
++          return;
++        }
+         if (existingIndex == -1) {
+           if (filter != null && filter.accept(chat)) { // chat became unfiltered
+             TdApi.ChatPosition position = ChatPosition.findPosition(chat, chatList.chatList());
+@@ -273,9 +283,13 @@ public final class TdlibChatListSlice implements Destroyable {
+                 return;
+               }
+               filteredList.add(atIndex, entry);
+-              subListener.onChatAdded(chatList, chat, atIndex, new Tdlib.ChatChange(position, Tdlib.ChatChange.ALL));
+-              displayCount++;
+-              subListener.onChatListChanged(chatList, ChangeFlags.ITEM_ADDED);
++              if (atIndex < displayCount) {
++                subListener.onChatAdded(chatList, chat, atIndex, new Tdlib.ChatChange(position, Tdlib.ChatChange.ALL));
++                displayCount++;
++                subListener.onChatListChanged(chatList, ChangeFlags.ITEM_ADDED);
++              } else {
++                dispatchChats(0);
++              }
+             }
+           }
+           return; // do nothing, as chat is not from this list
+@@ -291,6 +305,7 @@ public final class TdlibChatListSlice implements Destroyable {
+     this.subCallback = subCallback;
+     final RunnableData<List<TdlibChatList.Entry>> callback = (moreChats) -> {
+       tdlib.ensureTdlibThread();
++      if (isDestroyed()) return;
+       synchronized (filteredList) {
+         List<Entry> addedEntries = new ArrayList<>(moreChats.size());
+         for (TdlibChatList.Entry entry : moreChats) {
+@@ -311,8 +326,10 @@ public final class TdlibChatListSlice implements Destroyable {
+     };
+ 
+     loadingInitialChunk = true;
+-    sourceList.initializeList(filter, listener, callback, this.maxSize = initialChunkSize, () -> {
++    tdlib.settings().addHiddenChatsListener(hiddenChatsListener);
++    sourceList.initializeList(this.filter, listener, callback, this.maxSize = initialChunkSize, () -> {
+       loadingInitialChunk = false;
++      if (isDestroyed()) { sourceList.unsubscribeFromUpdates(listener); return; }
+       dispatchChats(0);
+       if (!isDestroyed() && onLoadInitialChunk != null) {
+         onLoadInitialChunk.run();
+@@ -320,6 +337,16 @@ public final class TdlibChatListSlice implements Destroyable {
+     });
+   }
+ 
++  private final TdlibSettingsManager.HiddenChatsListener hiddenChatsListener = this::onHiddenChatChanged;
++
++  private void onHiddenChatChanged (long chatId) {
++    if (isDestroyed() || listener == null) return;
++    TdApi.Chat chat = tdlib.chat(chatId);
++    if (chat != null) {
++      listener.onChatListItemChanged(sourceList, chat, 0);
++    }
++  }
++
+   private boolean loadingInitialChunk;
+ 
+   private boolean isSuspended () {
+@@ -349,33 +376,48 @@ public final class TdlibChatListSlice implements Destroyable {
+     return notifyCount;
+   }
+ 
++  private boolean loadingMore;
++  private final List<Runnable> loadMoreCallbacks = new ArrayList<>();
++
+   public void loadMore (int moreCount, Runnable after) {
+-    if (isSuspended())
+-      return;
++    if (moreCount <= 0) return;
+     tdlib.runOnTdlibThread(() -> {
++      if (isSuspended()) return;
++      if (after != null) loadMoreCallbacks.add(after);
++      // Repeated scroll events share one request and one display limit.
++      if (loadingMore) return;
++      loadingMore = true;
+       maxSize += moreCount;
+-      if (dispatchChats(0) != 0) {
+-        if (after != null) {
+-          after.run();
++      Runnable complete = () -> {
++        loadingMore = false;
++        List<Runnable> callbacks = new ArrayList<>(loadMoreCallbacks);
++        loadMoreCallbacks.clear();
++        if (!isDestroyed()) {
++          for (Runnable callback : callbacks) callback.run();
+         }
++      };
++      if (dispatchChats(0) != 0 || sourceList.isEndReached()) {
++        complete.run();
+       } else {
+-        sourceList.loadMore(moreCount, () -> {
+-          dispatchChats(0);
+-          if (after != null) {
+-            after.run();
+-          }
++        sourceList.loadAtLeast(filter, maxSize, maxSize, () -> {
++          if (!isDestroyed()) dispatchChats(0);
++          complete.run();
+         });
+       }
+     });
+   }
+ 
+-  private boolean isDestroyed;
++  private volatile boolean isDestroyed;
+ 
+   @Override
+   public void performDestroy () {
+     if (!isDestroyed) {
+       isDestroyed = true;
+-      sourceList.unsubscribeFromUpdates(this.listener);
++      tdlib.settings().removeHiddenChatsListener(hiddenChatsListener);
++      tdlib.runOnTdlibThread(() -> {
++        sourceList.unsubscribeFromUpdates(this.listener);
++        loadMoreCallbacks.clear();
++      });
+     }
+   }
+ 
+@@ -393,6 +435,10 @@ public final class TdlibChatListSlice implements Destroyable {
+       if (isDestroyed()) {
+         return;
+       }
++      if (chat != null && tdlib.settings().isChatHidden(chat.id)) {
++        if (after != null) after.run();
++        return;
++      }
+       final int fromIndex = indexOfChat(chatId);
+       if (fromIndex != -1) {
+         /*if (fromIndex == 0) // No need to do anything
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java
+index 5ee89c6..f203e36 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java
+@@ -41,6 +41,7 @@ public class TdlibCounter {
+   }
+ 
+   public void reset (TdlibCounter copy) {
++    this.totalChatCount = copy.totalChatCount;
+     this.chatCount = copy.chatCount;
+     this.chatUnmutedCount = copy.chatUnmutedCount;
+     this.markedAsUnreadCount = copy.markedAsUnreadCount;
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotification.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotification.java
+index b2dd9d2..737cc9e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotification.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotification.java
+@@ -112,6 +112,7 @@ public class TdlibNotification implements Comparable<TdlibNotification> {
+   }
+ 
+   public boolean isHidden () {
++    if (tdlib.settings().isChatHidden(group.getChatId())) return true;
+     boolean isHidden = group.isHidden(id);
+     return isHidden && group.needRemoveDismissedMessages();
+   }
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationGroup.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationGroup.java
+index 887c141..3bc43ba 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationGroup.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationGroup.java
+@@ -406,11 +406,11 @@ public class TdlibNotificationGroup implements Iterable<TdlibNotification> {
+   }
+ 
+   public boolean isHidden () {
+-    return (flags & FLAG_VISIBLE) == 0 && isHidden(maxNotificationId());
++    return tdlib.settings().isChatHidden(chatId) || ((flags & FLAG_VISIBLE) == 0 && isHidden(maxNotificationId()));
+   }
+ 
+   public boolean isHidden (int notificationId) {
+-    return hiddenNotificationId != 0 && hiddenNotificationId >= notificationId;
++    return tdlib.settings().isChatHidden(chatId) || (hiddenNotificationId != 0 && hiddenNotificationId >= notificationId);
+   }
+ 
+   public void markAsVisible () {
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationHelper.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationHelper.java
+index e1b2762..85ae648 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationHelper.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationHelper.java
+@@ -290,6 +290,10 @@ public class TdlibNotificationHelper implements Iterable<TdlibNotificationGroup>
+     } else if (edited != null) {
+       edited.markAsEdited(false);
+     }
++    if (tdlib.settings().isChatHidden(group.getChatId())) {
++      hideNotificationGroup(group);
++      return;
++    }
+     group.markAsVisible();
+     displayNotificationGroup(group, needNotification, notificationSettingsChatId);
+   }
+@@ -562,6 +566,11 @@ public class TdlibNotificationHelper implements Iterable<TdlibNotificationGroup>
+ 
+   private void hideNotificationGroup (@NonNull TdlibNotificationGroup group) {
+     Context context = AppContext.get();
++    if (tdlib.settings().isChatHidden(group.getChatId())) {
++      String shortcutId = "tgx_ns_" + tdlib.id() + "_" + tdlib.settings().getLocalChatId(group.getChatId());
++      androidx.core.content.pm.ShortcutManagerCompat.removeDynamicShortcuts(context, java.util.Collections.singletonList(shortcutId));
++      androidx.core.content.pm.ShortcutManagerCompat.removeLongLivedShortcuts(context, java.util.Collections.singletonList(shortcutId));
++    }
+     int badgeCount = tdlib.getUnreadBadgeCount();
+     boolean allowPreview = allowNotificationPreview();
+     style.hideNotificationGroup(context, this, badgeCount, allowPreview, group);
+@@ -588,7 +597,17 @@ public class TdlibNotificationHelper implements Iterable<TdlibNotificationGroup>
+   }
+ 
+   public void rebuildChat (long specificChatId) {
+-    rebuild(null, specificChatId, 0);
++    if (tdlib.settings().isChatHidden(specificChatId)) {
++      String shortcutId = "tgx_ns_" + tdlib.id() + "_" + tdlib.settings().getLocalChatId(specificChatId);
++      Context context = AppContext.get();
++      androidx.core.content.pm.ShortcutManagerCompat.removeDynamicShortcuts(context, java.util.Collections.singletonList(shortcutId));
++      androidx.core.content.pm.ShortcutManagerCompat.removeLongLivedShortcuts(context, java.util.Collections.singletonList(shortcutId));
++      for (TdlibNotificationGroup group : groups.values()) {
++        if (group.getChatId() == specificChatId) hideNotificationGroup(group);
++      }
++    } else {
++      rebuild(null, specificChatId, 0);
++    }
+   }
+ 
+   public void rebuildGroup (int groupId) {
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationManager.java
+index a5b79fa..f89fc55 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationManager.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationManager.java
+@@ -2112,7 +2112,7 @@ public class TdlibNotificationManager implements UI.StateListener, Passcode.Lock
+ 
+   @TdlibThread
+   void onUpdateNewMessage (TdApi.UpdateNewMessage update) {
+-    if (update.message.isOutgoing || update.message.sendingState != null)
++    if (tdlib.settings().isChatHidden(update.message.chatId) || update.message.isOutgoing || update.message.sendingState != null)
+       return;
+     ViewController<?> c = null;
+     try {
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationStyle.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationStyle.java
+index b789b70..7d3aca9 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationStyle.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibNotificationStyle.java
+@@ -244,7 +244,7 @@ public class TdlibNotificationStyle implements TdlibNotificationStyleDelegate, F
+   protected final int displayChildNotification (NotificationManagerCompat manager, Context context, @NonNull TdlibNotificationHelper helper, int badgeCount, boolean allowPreview, @NonNull TdlibNotificationGroup group, TdlibNotificationSettings settings, int notificationId, boolean isSummary, boolean isRebuild) {
+     final int category = group.getCategory();
+ 
+-    if (!allowPreview || group.isEmpty()) {
++    if (tdlib.settings().isChatHidden(group.getChatId()) || !allowPreview || group.isEmpty()) {
+       manager.cancel(helper.tag(category), notificationId);
+       return DISPLAY_STATE_HIDDEN;
+     }
+@@ -720,6 +720,13 @@ public class TdlibNotificationStyle implements TdlibNotificationStyleDelegate, F
+       try {
+         if (Config.TEST_NOTIFICATION_PROBLEM_RESOLUTION)
+           throw new RuntimeException();
++        if (tdlib.settings().isChatHidden(group.getChatId())) {
++          manager.cancel(helper.tag(category), notificationId);
++          String hiddenShortcut = "tgx_ns_" + tdlib.id() + "_" + tdlib.settings().getLocalChatId(group.getChatId());
++          ShortcutManagerCompat.removeDynamicShortcuts(context, Collections.singletonList(hiddenShortcut));
++          ShortcutManagerCompat.removeLongLivedShortcuts(context, Collections.singletonList(hiddenShortcut));
++          return DISPLAY_STATE_HIDDEN;
++        }
+         manager.notify(helper.tag(category), notificationId, notification);
+         state = DISPLAY_STATE_OK;
+       } catch (Throwable t) {
+@@ -751,6 +758,7 @@ public class TdlibNotificationStyle implements TdlibNotificationStyleDelegate, F
+ 
+   @RequiresApi(api = Build.VERSION_CODES.R)
+   protected final String createShortcut (NotificationCompat.Builder builder, Context context, @NonNull TdlibNotificationGroup group, CharSequence visualChatTitle, long chatId, Bitmap icon) {
++    if (tdlib.settings().isChatHidden(chatId)) return null;
+     long localChatId = tdlib.settings().getLocalChatId(chatId);
+     String localKey = "tgx_ns_" + tdlib.id() + "_" + localChatId;
+     IconCompat chatIcon = U.isValidBitmap(icon) ? IconCompat.createWithBitmap(icon) : null;
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
+index ba92082..68841c2 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
+@@ -131,6 +131,67 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+     tdlib.listeners().addCleanupListener(this);
+   }
+ 
++  private static final String HIDDEN_CHATS_KEY = "sviri_hidden_chats";
++  private volatile HiddenChatStore hiddenChats;
++  private final java.util.concurrent.CopyOnWriteArrayList<HiddenChatsListener> hiddenChatsListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
++
++  public interface HiddenChatsListener {
++    void onHiddenChatChanged (long chatId);
++  }
++
++  private HiddenChatStore hiddenChats () {
++    HiddenChatStore store = hiddenChats;
++    if (store == null) {
++      synchronized (this) {
++        store = hiddenChats;
++        if (store == null) {
++          final String storageKey = key(HIDDEN_CHATS_KEY, tdlib.id());
++          hiddenChats = store = new HiddenChatStore(new HiddenChatStore.Storage() {
++            @Override public long[] read () { return Settings.instance().getLongArray(storageKey); }
++            @Override public void write (long[] ids) { Settings.instance().putLongArray(storageKey, ids); }
++          });
++        }
++      }
++    }
++    return store;
++  }
++
++  public boolean isChatHidden (long chatId) {
++    return hiddenChats().contains(chatId);
++  }
++
++  public boolean hasHiddenChats () {
++    return !hiddenChats().isEmpty();
++  }
++
++  public long[] hiddenChatIds () {
++    return hiddenChats().chatIds();
++  }
++
++  public void setChatHidden (long chatId, boolean hidden) {
++    setChatsHidden(new long[] {chatId}, hidden);
++  }
++
++  public void setChatsHidden (long[] chatIds, boolean hidden) {
++    long[] changed = hiddenChats().setHidden(chatIds, hidden);
++    if (changed.length == 0) return;
++    tdlib.runOnTdlibThread(() -> {
++      for (long chatId : changed) {
++        for (HiddenChatsListener listener : hiddenChatsListeners) listener.onHiddenChatChanged(chatId);
++        tdlib.notifications().onUpdateNotifications(chatId);
++      }
++      tdlib.refreshLocalVisibilityCounters();
++    });
++  }
++
++  public void addHiddenChatsListener (HiddenChatsListener listener) {
++    hiddenChatsListeners.addIfAbsent(listener);
++  }
++
++  public void removeHiddenChatsListener (HiddenChatsListener listener) {
++    hiddenChatsListeners.remove(listener);
++  }
++
+   private void load () {
+     // FIXME
+   }
+@@ -158,6 +219,8 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+     editor.remove(key(THEME_CHAT_STYLE_KEY, accountId));
+     editor.remove(key(PLAIN_CHANNEL_KEY, accountId));
+     editor.remove(key(PREFERENCES_KEY, accountId));
++    editor.remove(key(HIDDEN_CHATS_KEY, accountId));
++    hiddenChats = null;
+     editor.remove(key(THEME_GLOBAL_THEME_KEY, accountId));
+     editor.remove(key(THEME_GLOBAL_THEME_NIGHT_KEY, accountId));
+     editor.remove(key(THEME_GLOBAL_THEME_DAYLIGHT_KEY, accountId));
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java
+index 3f0cccf..c9a225e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java
+@@ -2025,6 +2025,15 @@ public class TdlibUi extends Handler {
+   }
+ 
+   public void openChat (final TdlibDelegate context, final @NonNull TdApi.Chat chatFinal, final @Nullable ChatOpenParameters params) {
++    if (tdlib.settings().isChatHidden(chatFinal.id) &&
++        !(context instanceof org.thunderdog.challegram.ui.SettingsHiddenChatsController) &&
++        !(context instanceof MessagesController && ((MessagesController) context).compareChat(chatFinal.id))) {
++      tdlib.ui().post(() -> {
++        UI.showToast(R.string.SviriHiddenChatOpenHint, Toast.LENGTH_SHORT);
++        if (params != null) params.onDone();
++      });
++      return;
++    }
+     if (params != null && params.highlightMessageId != null) {
+       params.highlightMessageId = new MessageId(chatFinal.id, params.highlightMessageId.getMessageId(), params.highlightMessageId.getOtherMessageIds());
+     }
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
+index 9f7fc1a..2d41071 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
+@@ -395,7 +395,7 @@ public class ChatFoldersFeatureController extends SinglePageBottomSheetViewContr
+         .colorSet(unreadCounterColorSet)
+         .build();
+       unreadCounterColorSet.setCounter(unreadCounter);
+-      TdlibCounter counter = tdlib.getCounter(chatList);
++      TdlibCounter counter = tdlib.getVisibleCounter(chatList);
+       MainController.updateCounter(tdlib, chatList, unreadCounter, counter, /* animated */ false);
+       return unreadCounter;
+     }
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
+index 070ed21..36d90df 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
+@@ -156,7 +156,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+   private ChatFilter filter;
+ 
+   public TdApi.Chat filter (TdApi.Chat chat) {
+-    return chat != null && (filter == null || filter.accept(chat)) && ChatPosition.findPosition(chat, chatList()) != null ? chat : null;
++    return chat != null && !tdlib.settings().isChatHidden(chat.id) && (filter == null || filter.accept(chat)) && ChatPosition.findPosition(chat, chatList()) != null ? chat : null;
+   }
+ 
+   public @Nullable ChatFilter getFilter () {
+@@ -624,7 +624,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+         }
+       });
+     });
+-    list.initializeList(this, this::displayChats, chatsView.getInitialLoadCount(), () ->
++    list.initializeList(this, this::displayChats, Math.min(50, chatsView.getInitialLoadCount()), () ->
+       runOnUiThreadOptional(() -> {
+         this.listInitialized = true;
+         checkListState();
+@@ -693,7 +693,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+                 ChangeFlags.ITEM_MOVED
+             )) {
+               runOnUiThreadOptional(() -> {
+-                adapter.setNeedArchive(chatList.totalCount() > 0);
++                adapter.setNeedArchive(tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE).totalChatCount > 0);
+                 scheduleArchiveUpdate(ChatsAdapter.ArchiveUpdate.ALL);
+               });
+             }
+@@ -722,9 +722,9 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+             );
+           }
+         };
+-        adapter.setNeedArchive(archiveList.totalCount() > 0);
++        adapter.setNeedArchive(tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE).totalChatCount > 0);
+         archiveList.subscribeToUpdates(archiveListListener);
+-        archiveList.loadAtLeast(null, 3, null);
++        archiveList.loadAtLeast(chat -> !tdlib.settings().isChatHidden(chat.id), 3, null);
+         tdlib.settings().addUserPreferenceChangeListener(this);
+       }
+     }
+@@ -1333,12 +1333,16 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+         }
+       }
+ 
+-      if (selectedChats.size() < tdlib.getCounter(chatList()).totalChatCount) {
++      if (selectedChats.size() < tdlib.getVisibleCounter(chatList()).totalChatCount) {
+         ids.append(R.id.more_btn_selectAll);
+         strings.append(R.string.SelectMore);
+         icons.append(R.drawable.baseline_playlist_add_check_24);
+       }
+ 
++      ids.append(R.id.more_btn_hideChat);
++      strings.append(R.string.SviriHideChat);
++      icons.append(R.drawable.baseline_eye_off_24);
++
+       if (canArchive + canUnarchive > 0) {
+         ids.append(canUnarchive > 0 ? R.id.more_btn_unarchive : R.id.more_btn_archive);
+         strings.append(canUnarchive > 0 ? R.string.Unarchive : R.string.Archive);
+@@ -1701,7 +1705,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+ 
+   @Override
+   public void onMoreItemPressed (int id) {
+-    if (id == R.id.more_btn_addToFolder) {
++    if (id == R.id.more_btn_hideChat) {
++      long[] ids = ArrayUtils.keys(selectedChats);
++      tdlib.settings().setChatsHidden(ids, true);
++      getParentOrSelf().closeSelectMode();
++      finishSelectMode(-1);
++    } else if (id == R.id.more_btn_addToFolder) {
+       long[] selectedChatIds = ArrayUtils.keys(selectedChats);
+       tdlib.ui().showAddChatsToFolderOptions(this, selectedChatIds, this::onSelectionActionComplete);
+       // break;
+@@ -1869,7 +1878,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+       strings.append(R.string.SelectAll);
+       icons.append(R.drawable.baseline_playlist_add_check_24);
+ 
+-      if (canMarkAsRead == selectedChats.size() && canMarkAsRead < tdlib.getCounter(chatList()).chatCount) {
++      if (canMarkAsRead == selectedChats.size() && canMarkAsRead < tdlib.getVisibleCounter(chatList()).chatCount) {
+         ids.append(R.id.btn_selectUnread);
+         strings.append(R.string.SelectUnread);
+         icons.append(Config.ICON_MARK_AS_UNREAD);
+@@ -1881,11 +1890,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+ 
+       showOptions(Lang.getString(R.string.SelectMore), ids.get(), strings.get(), null, icons.get(), (v, optionId) -> {
+         if (optionId == R.id.btn_selectAll) {
+-          selectChats(chat -> true, tdlib.getCounter(chatList()).totalChatCount);
++          selectChats(chat -> true, tdlib.getVisibleCounter(chatList()).totalChatCount);
+         } else if (optionId == R.id.btn_selectUnread) {
+-          selectChats(chat -> chat.unreadCount > 0 || chat.isMarkedAsUnread, tdlib.getCounter(chatList()).chatCount);
++          selectChats(chat -> chat.unreadCount > 0 || chat.isMarkedAsUnread, tdlib.getVisibleCounter(chatList()).chatCount);
+         } else if (optionId == R.id.btn_selectMuted) {
+-          selectChats(tdlib::chatNeedsMuteIcon, tdlib.getCounter(chatList()).totalChatCount);
++          selectChats(tdlib::chatNeedsMuteIcon, tdlib.getVisibleCounter(chatList()).totalChatCount);
+         }
+         return true;
+       });
+@@ -2046,7 +2055,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+ 
+   @Override
+   public void requestLoadMore () {
+-    list.loadMore(chatsView != null ? chatsView.getLoadCount() : 40, null);
++    list.loadMore(chatsView != null ? Math.min(50, chatsView.getLoadCount()) : 40, null);
+   }
+ 
+   // Search mode
+@@ -2079,7 +2088,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+ 
+   @Override
+   protected boolean filterChatMessageSearchResult (TdApi.Chat chat) {
+-    return chat != null && (filter == null || !filter.canFilterMessages() || filter.accept(chat)) && ChatPosition.findPosition(chat, chatList()) != null;
++    return chat != null && !tdlib.settings().isChatHidden(chat.id) && (filter == null || !filter.canFilterMessages() || filter.accept(chat)) && ChatPosition.findPosition(chat, chatList()) != null;
+   }
+ 
+   @Override
+@@ -3002,6 +3011,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+ 
+   @Override
+   public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
++    if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && adapter != null && archiveList != null) {
++      runOnUiThreadOptional(() -> {
++        adapter.setNeedArchive(tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE).totalChatCount > 0);
++        scheduleArchiveUpdate(ChatsAdapter.ArchiveUpdate.ALL);
++      });
++    }
+     if (totalCount == 0 && chatList.getConstructor() != TdApi.ChatListMain.CONSTRUCTOR && Td.equalsTo(this.chatList, chatList)) {
+       runOnUiThreadOptional(() -> {
+         if (!isDestroyed() && !isBaseController()) {
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ContactsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ContactsController.java
+index aa708d3..614f3d1 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/ContactsController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/ContactsController.java
+@@ -85,7 +85,7 @@ import me.vkryl.core.collection.LongList;
+ import tgx.td.Td;
+ 
+ public class ContactsController extends TelegramViewController<ContactsController.Args> implements OptionDelegate, BubbleHeaderView.Callback, TextWatcher, Runnable, Menu, Unlockable,
+-  TdlibCache.UserDataChangeListener, TdlibCache.UserStatusChangeListener, Comparator<TdApi.User> {
++  TdlibCache.UserDataChangeListener, TdlibCache.UserStatusChangeListener, Comparator<TdApi.User>, org.thunderdog.challegram.telegram.TdlibSettingsManager.HiddenChatsListener {
+   public static final int MODE_PICK = 1;
+   public static final int MODE_CHANNEL_MEMBERS = 2;
+   public static final int MODE_NEW_GROUP = 3;
+@@ -289,6 +289,7 @@ public class ContactsController extends TelegramViewController<ContactsControlle
+     contentView = new FrameLayoutFix(context);
+     ViewSupport.setThemedBackground(contentView, ColorId.filling, this);
+ 
++    tdlib.settings().addHiddenChatsListener(this);
+     recyclerView = new SectionedRecyclerView(context);
+     Views.applyBottomInset(recyclerView, extraBottomInset);
+     recyclerView.setSectionedAdapter(adapter = new ContactsAdapter(recyclerView, this));
+@@ -894,6 +895,7 @@ public class ContactsController extends TelegramViewController<ContactsControlle
+           Log.critical("ContactsController::sortUsers: TGUser is null");
+           continue;
+         }
++        if (mode != MODE_CHANNEL_MEMBERS && tdlib.settings().isChatHidden(user.getChatId())) continue;
+         TdApi.Usernames usernames = user.getUsernames();
+         String check = TD.getUserName(user.getFirstName(), user.getLastName());
+ 
+@@ -1319,6 +1321,7 @@ public class ContactsController extends TelegramViewController<ContactsControlle
+ 
+   @Override
+   public void destroy () {
++    tdlib.settings().removeHiddenChatsListener(this);
+     super.destroy();
+     Views.destroyRecyclerView(recyclerView);
+     if (headerCell != null) {
+@@ -1347,6 +1350,15 @@ public class ContactsController extends TelegramViewController<ContactsControlle
+     }
+   }
+ 
++  @Override
++  public void onHiddenChatChanged (long chatId) {
++    tdlib.ui().post(() -> {
++      if (!isDestroyed() && users != null) {
++        sortUsers(users, lastQuery == null || lastQuery.isEmpty() ? null : lastQuery, false);
++      }
++    });
++  }
++
+   // Updates
+ 
+   @Override
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
+index f81e95e..706321a 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
+@@ -1824,7 +1824,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+         .callback(unreadCounterCallback(MAIN_PAGER_ITEM_ID))
+         .build();
+       unreadCounterColorSet.setCounter(unreadCounter);
+-      updateCounter(ChatPosition.CHAT_LIST_MAIN, unreadCounter, tdlib.getCounter(ChatPosition.CHAT_LIST_MAIN), false);
++      updateCounter(ChatPosition.CHAT_LIST_MAIN, unreadCounter, tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_MAIN), false);
+       defaultCounterListener = new CounterChangeListener() {
+         @Override
+         public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
+@@ -1847,7 +1847,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+             });
+           } else if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
+             executeOnUiThreadOptional(() -> {
+-              updateCounter(ChatPosition.CHAT_LIST_MAIN, unreadCounter, tdlib.getCounter(ChatPosition.CHAT_LIST_MAIN), isFocused());
++              updateCounter(ChatPosition.CHAT_LIST_MAIN, unreadCounter, tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_MAIN), isFocused());
+             });
+           }
+         }
+@@ -2991,7 +2991,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+     int selectedFilter = getSelectedFilter(pagerItemId);
+     Counter unreadCounter = buildUnreadCounter(pagerItemId, selectedFilter);
+     if (unreadCounter != null) {
+-      TdlibCounter counter = tdlib.getCounter(chatList);
++      TdlibCounter counter = tdlib.getVisibleCounter(chatList);
+       updateCounter(chatList, unreadCounter, counter, /* animated */ false);
+     }
+     boolean showIcon = hasIcon(chatFolderStyle) || (pagerItemId == MAIN_PAGER_ITEM_ID && pagerItemPosition == 0);
+@@ -3042,6 +3042,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   }
+ 
+   public static void updateCounter (Tdlib tdlib, TdApi.ChatList chatList, Counter target, TdlibCounter counter, boolean animated) {
++    counter = tdlib.getVisibleCounter(chatList);
+     int mutedCount, unmutedCount;
+     int badgeFlags = tdlib.settings().getChatFolderBadgeFlags();
+     boolean countMessages = BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_MESSAGES);
+@@ -3053,7 +3054,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+       unmutedCount = Math.max(0, counter.chatUnmutedCount);
+     }
+     if (BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED) && chatList.getConstructor() == TdApi.ChatListMain.CONSTRUCTOR) {
+-      TdlibCounter archiveCounter = tdlib.getCounter(ChatPosition.CHAT_LIST_ARCHIVE);
++      TdlibCounter archiveCounter = tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE);
+       if (countMessages) {
+         mutedCount += Math.max(0, archiveCounter.messageCount);
+         unmutedCount += Math.max(0, archiveCounter.messageUnmutedCount);
+@@ -3202,7 +3203,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+         }
+         dispatchCounter(chatList, counter);
+         if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
+-          dispatchCounter(ChatPosition.CHAT_LIST_MAIN, tdlib.getCounter(ChatPosition.CHAT_LIST_MAIN));
++          dispatchCounter(ChatPosition.CHAT_LIST_MAIN, tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_MAIN));
+         }
+       });
+     }
+@@ -3224,7 +3225,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+       TdApi.ChatList chatList = pagerChatLists.get(i);
+       ViewPagerTopView.Item section = pagerSections.get(i);
+       if (section.counter != null) {
+-        TdlibCounter counter = tdlib.getCounter(chatList);
++        TdlibCounter counter = tdlib.getVisibleCounter(chatList);
+         updateCounter(chatList, section.counter, counter, isFocused());
+       }
+     }
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
+index 30a74d2..4d77b03 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
+@@ -637,6 +637,8 @@ public class SettingsController extends ViewController<Void> implements
+     items.add(new ListItem(ListItem.TYPE_SEPARATOR));
+     items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_chatSettings, R.drawable.baseline_data_usage_24, R.string.DataSettings));
+     items.add(new ListItem(ListItem.TYPE_SEPARATOR));
++    items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_hiddenChats, R.drawable.baseline_eye_off_24, R.string.SviriHiddenChats));
++    items.add(new ListItem(ListItem.TYPE_SEPARATOR));
+     items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_privacySettings, R.drawable.baseline_lock_24, R.string.PrivacySettings));
+     items.add(new ListItem(ListItem.TYPE_SEPARATOR));
+     items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_stickerSettingsAndEmoji, R.drawable.deproko_baseline_stickers_filled_24, R.string.StickersAndEmoji));
+@@ -1229,6 +1231,8 @@ public class SettingsController extends ViewController<Void> implements
+       navigateTo(c);
+     } else if (viewId == R.id.btn_chatSettings) {
+       navigateTo(new SettingsDataController(context, tdlib));
++    } else if (viewId == R.id.btn_hiddenChats) {
++      navigateTo(new SettingsHiddenChatsController(context, tdlib));
+     } else if (viewId == R.id.btn_privacySettings) {
+       navigateTo(new SettingsPrivacyController(context, tdlib));
+     } else if (viewId == R.id.btn_help) {
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SettingsHiddenChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SettingsHiddenChatsController.java
+new file mode 100644
+index 0000000..887f511
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SettingsHiddenChatsController.java
+@@ -0,0 +1,90 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.content.Context;
++import android.view.View;
++
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.telegram.TdlibSettingsManager;
++import org.thunderdog.challegram.telegram.TdlibUi;
++import org.thunderdog.challegram.v.CustomRecyclerView;
++
++import java.util.ArrayList;
++
++public final class SettingsHiddenChatsController extends RecyclerViewController<Void>
++    implements View.OnClickListener, TdlibSettingsManager.HiddenChatsListener {
++  private SettingsAdapter adapter;
++
++  public SettingsHiddenChatsController (Context context, Tdlib tdlib) {
++    super(context, tdlib);
++  }
++
++  @Override public int getId () { return R.id.controller_hiddenChats; }
++  @Override public CharSequence getName () { return Lang.getString(R.string.SviriHiddenChats); }
++
++  @Override
++  protected void onCreateView (Context context, CustomRecyclerView recyclerView) {
++    adapter = new SettingsAdapter(this);
++    recyclerView.setAdapter(adapter);
++    tdlib.settings().addHiddenChatsListener(this);
++    rebuildItems();
++    for (long chatId : tdlib.settings().hiddenChatIds()) {
++      if (tdlib.chat(chatId) == null) {
++        tdlib.chat(chatId, () -> new TdApi.GetChat(chatId), chat -> runOnUiThreadOptional(this::rebuildItems));
++      }
++    }
++  }
++
++  private void rebuildItems () {
++    if (adapter == null || isDestroyed()) return;
++    ArrayList<ListItem> items = new ArrayList<>();
++    items.add(new ListItem(ListItem.TYPE_DESCRIPTION, 0, 0, R.string.SviriHiddenChatsHint));
++    long[] hidden = tdlib.settings().hiddenChatIds();
++    if (hidden.length == 0) {
++      items.add(new ListItem(ListItem.TYPE_EMPTY, 0, 0, R.string.SviriNoHiddenChats));
++    } else {
++      items.add(new ListItem(ListItem.TYPE_SHADOW_TOP));
++      for (int i = 0; i < hidden.length; i++) {
++        long chatId = hidden[i];
++        TdApi.Chat chat = tdlib.chat(chatId);
++        String title = chat != null ? chat.title : Long.toString(chatId);
++        items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_hiddenChat, R.drawable.baseline_eye_off_24, title).setLongId(chatId));
++        if (i + 1 < hidden.length) items.add(new ListItem(ListItem.TYPE_SEPARATOR));
++      }
++      items.add(new ListItem(ListItem.TYPE_SHADOW_BOTTOM));
++    }
++    adapter.setItems(items, false);
++  }
++
++  @Override
++  public void onClick (View view) {
++    if (view.getId() != R.id.btn_hiddenChat || !(view.getTag() instanceof ListItem)) return;
++    long chatId = ((ListItem) view.getTag()).getLongId();
++    showOptions(tdlib.chatTitle(chatId),
++      new int[] {R.id.btn_openHiddenChat, R.id.btn_unhideChat},
++      new String[] {Lang.getString(R.string.SviriOpenHiddenChat), Lang.getString(R.string.SviriUnhideChat)},
++      null, new int[] {R.drawable.baseline_chat_bubble_24, R.drawable.baseline_visibility_24},
++      (itemView, id) -> {
++        if (id == R.id.btn_openHiddenChat) {
++          tdlib.ui().openChat(this, chatId, new TdlibUi.ChatOpenParameters().keepStack());
++        } else if (id == R.id.btn_unhideChat) {
++          tdlib.settings().setChatHidden(chatId, false);
++        }
++        return true;
++      });
++  }
++
++  @Override
++  public void onHiddenChatChanged (long chatId) {
++    runOnUiThreadOptional(this::rebuildItems);
++  }
++
++  @Override
++  public void destroy () {
++    tdlib.settings().removeHiddenChatsListener(this);
++    super.destroy();
++  }
++}
+diff --git a/app/src/main/other/themes/colors-and-properties.xml b/app/src/main/other/themes/colors-and-properties.xml
+index 795c154..9cd6609 100644
+--- a/app/src/main/other/themes/colors-and-properties.xml
++++ b/app/src/main/other/themes/colors-and-properties.xml
+@@ -4,7 +4,7 @@
+     <source-theme>1</source-theme>
+     <default-theme>
+       <light>11</light>
+-      <dark>10</dark>
++      <dark>12</dark>
+     </default-theme>
+   </settings>
+   <sections>
+@@ -570,4 +570,4 @@
+     <item name="bubbleOut_blockQuoteText" porterDuff="true" fallback="bubbleOut_time"/>
+     <item name="bubbleOut_blockQuoteLine" porterDuff="true" fallback="bubbleOut_time"/>
+   </colors>
+-</xml>
+\ No newline at end of file
++</xml>
+diff --git a/app/src/main/other/themes/swiryyyyX Dark.tgx-theme b/app/src/main/other/themes/swiryyyyX Dark.tgx-theme
+new file mode 100644
+index 0000000..747d567
+--- /dev/null
++++ b/app/src/main/other/themes/swiryyyyX Dark.tgx-theme	
+@@ -0,0 +1,17 @@
++!
++id: 12
++name: "swiryyyyX Dark"
++time: 1791220000
++@
++parentTheme: 2
++dark: 1
++bubbleCorner: 20
++bubbleCornerMerged: 8
++imageCorner: 16
++#
++background, filling, headerBackground, chatBackground: #191919
++headerLightBackground, bubbleIn_background, bubbleOut_background: #252525
++text, headerText, headerLightText: #FFFFFF
++textLight, textPlaceholder, chatListIcon, chatListMute: #939393
++iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
++circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
+diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
+index 98ed3d2..4445115 100644
+--- a/app/src/main/res/values/ids.xml
++++ b/app/src/main/res/values/ids.xml
+@@ -1,5 +1,11 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
++  <item type="id" name="more_btn_hideChat" />
++  <item type="id" name="btn_hiddenChats" />
++  <item type="id" name="btn_hiddenChat" />
++  <item type="id" name="btn_unhideChat" />
++  <item type="id" name="btn_openHiddenChat" />
++  <item type="id" name="controller_hiddenChats" />
+   <item type="id" name="app_root" />
+   <item type="id" name="app_container" />
+ 
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 416f9af..558968c 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,5 +1,12 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources xmlns:tools="http://schemas.android.com/tools">
++  <string name="SviriHideChat">Hide chat</string>
++  <string name="SviriHiddenChatOpenHint">Цей чат прихований. Відкрий його в налаштуваннях, у розділі «Приховані чати».</string>
++  <string name="SviriHiddenChats">Приховані чати</string>
++  <string name="SviriHiddenChatsHint">Ці чати приховані лише в цьому клієнті. Натисни на чат, щоб відкрити його або повернути до списку.</string>
++  <string name="SviriNoHiddenChats">Прихованих чатів поки немає</string>
++  <string name="SviriOpenHiddenChat">Відкрити чат</string>
++  <string name="SviriUnhideChat">Повернути до списку</string>
+   <string name="language_continueInLanguage">Continue in English</string>
+ 
+   <string name="Page1Title">Telegram X</string>
+diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
+new file mode 100644
+index 0000000..7c7e1c4
+--- /dev/null
++++ b/build-swiryyyyX.ps1
+@@ -0,0 +1,22 @@
++$ErrorActionPreference = 'Stop'
++Set-Location $PSScriptRoot
++if (!(Test-Path 'local.properties')) {
++  Copy-Item 'local.properties.swiryyyyX.example' 'local.properties'
++  throw 'Fill sdk.dir, msys2.dir, telegram.api_id and telegram.api_hash in local.properties, then run again.'
++}
++$properties = Get-Content 'local.properties' -Raw
++foreach ($key in @('sdk.dir', 'msys2.dir', 'telegram.api_id', 'telegram.api_hash')) {
++  $escaped = [regex]::Escape($key)
++  if ($properties -notmatch "(?m)^$escaped\s*=\s*\S+") {
++    throw "Missing $key in local.properties"
++  }
++}
++$javaVersion = & java -version 2>&1 | Out-String
++if ($LASTEXITCODE -ne 0 -or $javaVersion -notmatch 'version "25[.\"]') {
++  throw 'Use JDK 25 in PATH and JAVA_HOME before building this Telegram X revision.'
++}
++& git submodule update --init --recursive
++if ($LASTEXITCODE -ne 0) { throw 'Could not prepare source submodules.' }
++& .\gradlew.bat assembleLatestUniversalDebug
++if ($LASTEXITCODE -ne 0) { throw 'APK build failed; inspect the Gradle error above.' }
++Get-ChildItem 'app/build/outputs/apk' -Recurse -Filter '*.apk' | Select-Object FullName, Length
+diff --git a/local.properties.swiryyyyX.example b/local.properties.swiryyyyX.example
+new file mode 100644
+index 0000000..9de2c4a
+--- /dev/null
++++ b/local.properties.swiryyyyX.example
+@@ -0,0 +1,11 @@
++# Copy to local.properties; fill local paths and your own Telegram credentials.
++# Use forward slashes in Windows paths.
++sdk.dir=
++msys2.dir=
++app.id=ua.swiryyyyx.client
++app.name=swiryyyyX
++app.download_url=https://telegram.org/dlx
++app.disable_signing=true
++telegram.api_id=
++telegram.api_hash=
++tgx.extension=none
+diff --git a/tests/sviri/HiddenChatStoreTest.java b/tests/sviri/HiddenChatStoreTest.java
+new file mode 100644
+index 0000000..168442f
+--- /dev/null
++++ b/tests/sviri/HiddenChatStoreTest.java
+@@ -0,0 +1,71 @@
++import org.thunderdog.challegram.telegram.HiddenChatStore;
++import java.util.Arrays;
++
++public class HiddenChatStoreTest {
++  static class Memory implements HiddenChatStore.Storage {
++    long[] ids;
++    int writes;
++    boolean fail;
++    @Override public long[] read () { return ids; }
++    @Override public void write (long[] value) {
++      if (fail) throw new IllegalStateException("disk error");
++      ids = value.clone();
++      writes++;
++    }
++  }
++
++  static void check (boolean value, String message) {
++    if (!value) throw new AssertionError(message);
++  }
++
++  public static void main (String[] args) throws Exception {
++    Memory accountOne = new Memory();
++    HiddenChatStore store = new HiddenChatStore(accountOne);
++    check(store.isEmpty(), "new account");
++    check(!store.setHidden(0, true), "zero chat id rejected");
++    check(store.setHidden(-123456L, true), "groups use negative identifiers");
++    check(!store.setHidden(-123456L, true), "repeated hide is idempotent");
++    check(accountOne.writes == 1, "no redundant persistence");
++    check(new HiddenChatStore(accountOne).contains(-123456L), "restart retains hidden chats");
++    check(new HiddenChatStore(new Memory()).isEmpty(), "accounts stay independent");
++    long[] copy = store.chatIds();
++    copy[0] = 99;
++    check(store.contains(-123456L) && !store.contains(99), "snapshot cannot mutate visibility");
++    check(store.setHidden(-123456L, false), "unhide works");
++    check(new HiddenChatStore(accountOne).isEmpty(), "unhide persists");
++
++    accountOne.fail = true;
++    try { store.setHidden(7, true); throw new AssertionError("failed write accepted"); }
++    catch (IllegalStateException expected) { }
++    check(!store.contains(7), "failed persistence leaves previous state intact");
++    accountOne.fail = false;
++
++    Memory bulkMemory = new Memory();
++    HiddenChatStore bulk = new HiddenChatStore(bulkMemory);
++    long[] selection = new long[402];
++    for (int i = 0; i < 400; i++) selection[i] = i + 1;
++    selection[400] = 0;
++    selection[401] = 1;
++    check(bulk.setHidden(selection, true).length == 400, "bulk selection deduplicates and rejects zero");
++    check(bulkMemory.writes == 1, "400 chats persisted in one operation");
++    check(bulk.setHidden(selection, true).length == 0 && bulkMemory.writes == 1, "bulk hide idempotent");
++    bulkMemory.fail = true;
++    try { bulk.setHidden(selection, false); throw new AssertionError("failed bulk accepted"); }
++    catch (IllegalStateException expected) { }
++    check(bulk.chatIds().length == 400, "failed bulk write preserves the whole previous state");
++
++    Thread[] workers = new Thread[4];
++    for (int n = 0; n < workers.length; n++) {
++      final int base = n * 100;
++      workers[n] = new Thread(() -> {
++        for (int i = 1; i <= 100; i++) store.setHidden(base + i, true);
++      });
++      workers[n].start();
++    }
++    for (Thread worker : workers) worker.join();
++    check(store.chatIds().length == 400, "concurrent changes do not lose chats");
++    check(Arrays.equals(store.chatIds(), accountOne.ids), "saved snapshot matches live state");
++    for (int i = 1; i <= 400; i++) check(store.contains(i), "400-chat lookup");
++    System.out.println("PASS: persistence, account isolation, snapshots, failed writes, concurrency, 400 chats");
++  }
++}
+diff --git a/tests/sviri/ParseSources.java b/tests/sviri/ParseSources.java
+new file mode 100644
+index 0000000..2abf263
+--- /dev/null
++++ b/tests/sviri/ParseSources.java
+@@ -0,0 +1,25 @@
++import java.util.Arrays;
++import javax.tools.*;
++import com.sun.source.util.JavacTask;
++
++/** Syntax check only. This does not replace an Android build. */
++public class ParseSources {
++  public static void main (String[] paths) throws Exception {
++    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
++    DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
++    try (StandardJavaFileManager manager = compiler.getStandardFileManager(diagnostics, null, null)) {
++      JavacTask task = (JavacTask) compiler.getTask(null, manager, diagnostics,
++        Arrays.asList("-proc:none"), null, manager.getJavaFileObjects(paths));
++      task.parse();
++      boolean failed = false;
++      for (Diagnostic<?> diagnostic : diagnostics.getDiagnostics()) {
++        if (diagnostic.getKind() == Diagnostic.Kind.ERROR) {
++          System.err.println(diagnostic);
++          failed = true;
++        }
++      }
++      if (failed) throw new AssertionError("Java syntax errors");
++    }
++    System.out.println("PASS: Java syntax (Android symbols not checked)");
++  }
++}
+diff --git a/tests/sviri/VisibilityCoreTest.java b/tests/sviri/VisibilityCoreTest.java
+new file mode 100644
+index 0000000..15c937e
+--- /dev/null
++++ b/tests/sviri/VisibilityCoreTest.java
+@@ -0,0 +1,41 @@
++import org.thunderdog.challegram.telegram.HiddenCounterProjection;
++import org.thunderdog.challegram.telegram.ChatLoadRetry;
++
++public class VisibilityCoreTest {
++  static void check (boolean value, String message) {
++    if (!value) throw new AssertionError(message);
++  }
++
++  public static void main (String[] args) {
++    HiddenCounterProjection counters = new HiddenCounterProjection();
++    // A muted unread group, an unread private chat with a marker, and a marker-only chat.
++    counters.add(7, false, false);
++    counters.add(3, true, true);
++    counters.add(0, true, true);
++    check(counters.visible(HiddenCounterProjection.TOTAL, 400) == 397, "total count");
++    check(counters.visible(HiddenCounterProjection.CHATS, 8) == 5, "marked and messages overlap only once");
++    check(counters.visible(HiddenCounterProjection.UNMUTED_CHATS, 5) == 3, "muted chat excluded only from all chats");
++    check(counters.visible(HiddenCounterProjection.MARKED, 4) == 2, "marker-only chats");
++    check(counters.visible(HiddenCounterProjection.MESSAGES, 25) == 15, "message count");
++    check(counters.visible(HiddenCounterProjection.UNMUTED_MESSAGES, 10) == 7, "unmuted message count");
++    check(counters.visible(HiddenCounterProjection.CHATS, -1) == -1, "unknown is not empty");
++    check(counters.visible(HiddenCounterProjection.CHATS, 1) == 0, "approximate totals never turn negative");
++    counters.add(Integer.MAX_VALUE, false, true);
++    counters.add(Integer.MAX_VALUE, false, true);
++    check(counters.visible(HiddenCounterProjection.MESSAGES, Integer.MAX_VALUE) == 0, "large unread counts do not overflow");
++
++    ChatLoadRetry retry = new ChatLoadRetry();
++    check(retry.canRequest(0), "first request can start");
++    retry.failed(100);
++    check(!retry.canRequest(1099) && retry.canRequest(1100), "first failure retries at boundary");
++    retry.failed(1100);
++    check(!retry.canRequest(3099) && retry.canRequest(3100), "repeated error increases backoff");
++    for (int i = 0; i < 20; i++) retry.failed(10000);
++    check(!retry.canRequest(39999) && retry.canRequest(40000), "backoff capped at 30 seconds");
++    retry.succeeded();
++    check(retry.canRequest(10000), "success clears backoff");
++    retry.failed(10000);
++    check(retry.canRequest(11000), "new failure starts at one second again");
++    System.out.println("PASS: visible counts, muted/marked overlap, unknown values, overflow and network retry timeline");
++  }
++}
+diff --git a/tests/sviri/check_slice.py b/tests/sviri/check_slice.py
+new file mode 100644
+index 0000000..7673641
+--- /dev/null
++++ b/tests/sviri/check_slice.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++"""Exercise the real list slice against small TDLib boundary doubles."""
++from pathlib import Path
++import subprocess
++import tempfile
++
++root = Path(__file__).resolve().parents[2]
++fixtures = {
++ 'android/os/SystemClock.java': 'package android.os; public class SystemClock { public static long uptimeMillis(){return 1;} }',
++ 'androidx/annotation/NonNull.java': 'package androidx.annotation; public @interface NonNull {}',
++ 'androidx/annotation/Nullable.java': 'package androidx.annotation; public @interface Nullable {}',
++ 'org/thunderdog/challegram/Log.java': 'package org.thunderdog.challegram; public class Log { public static void e(String s,Object... args){} }',
++ 'me/vkryl/core/lambda/Destroyable.java': 'package me.vkryl.core.lambda; public interface Destroyable { void performDestroy(); }',
++ 'me/vkryl/core/lambda/Filter.java': 'package me.vkryl.core.lambda; public interface Filter<T> { boolean accept(T value); }',
++ 'me/vkryl/core/lambda/Future.java': 'package me.vkryl.core.lambda; public interface Future<T> { T get(); }',
++ 'me/vkryl/core/lambda/RunnableData.java': 'package me.vkryl.core.lambda; public interface RunnableData<T> { void runWithData(T value); }',
++ 'org/drinkless/tdlib/TdApi.java': '''package org.drinkless.tdlib;
++public class TdApi {
++ public static class Function<T> {}
++ public static class ChatList {}
++ public static class ChatPosition { public long order; public boolean isPinned; public Object source; }
++ public static class Chat { public long id; public ChatPosition position = new ChatPosition(); public Chat(long id){ this.id=id; position.order=10000-id; } }
++}''',
++ 'tgx/td/ChatPosition.java': '''package tgx.td; import org.drinkless.tdlib.TdApi;
++public class ChatPosition { public static TdApi.ChatPosition findPosition(TdApi.Chat c,TdApi.ChatList l){ return c.position; } }''',
++ 'org/thunderdog/challegram/telegram/TdlibThread.java': 'package org.thunderdog.challegram.telegram; public @interface TdlibThread {}',
++ 'org/thunderdog/challegram/telegram/ChatListListener.java': '''package org.thunderdog.challegram.telegram; import org.drinkless.tdlib.TdApi;
++public interface ChatListListener {
++ interface ChangeFlags { int ITEM_METADATA_CHANGED=1, ITEM_ADDED=2, ITEM_REMOVED=4, ITEM_MOVED=8; }
++ default void onChatChanged(TdlibChatList l,TdApi.Chat c,int i,Tdlib.ChatChange ch){}
++ default void onChatAdded(TdlibChatList l,TdApi.Chat c,int i,Tdlib.ChatChange ch){}
++ default void onChatRemoved(TdlibChatList l,TdApi.Chat c,int i,Tdlib.ChatChange ch){}
++ default void onChatMoved(TdlibChatList l,TdApi.Chat c,int i,int j,Tdlib.ChatChange ch){}
++ default void onChatListChanged(TdlibChatList l,int flags){}
++ default void onChatListStateChanged(TdlibChatList l,int n,int o){}
++ default void onChatListItemChanged(TdlibChatList l,TdApi.Chat c,int type){}
++}''',
++ 'org/thunderdog/challegram/telegram/TdlibSettingsManager.java': '''package org.thunderdog.challegram.telegram; import java.util.*;
++public class TdlibSettingsManager {
++ public interface HiddenChatsListener { void onHiddenChatChanged(long id); }
++ Set<Long> hidden = new HashSet<>(); List<HiddenChatsListener> listeners = new ArrayList<>();
++ public boolean isChatHidden(long id){return hidden.contains(id);}
++ public void addHiddenChatsListener(HiddenChatsListener l){listeners.add(l);}
++ public void removeHiddenChatsListener(HiddenChatsListener l){listeners.remove(l);}
++ public void hide(long id,boolean value){if(value)hidden.add(id);else hidden.remove(id); for(HiddenChatsListener l:new ArrayList<>(listeners))l.onHiddenChatChanged(id);}
++}''',
++ 'org/thunderdog/challegram/telegram/Tdlib.java': '''package org.thunderdog.challegram.telegram;
++import java.util.*; import org.drinkless.tdlib.TdApi; import me.vkryl.core.lambda.*;
++public class Tdlib {
++ public static class ChatChange { public static int ALL=15; public TdApi.ChatPosition position; public ChatChange(TdApi.ChatPosition p,int f){position=p;} }
++ TdlibSettingsManager settings = new TdlibSettingsManager(); Map<Long,TdApi.Chat> chats=new HashMap<>();
++ public void ensureTdlibThread(){} public void runOnTdlibThread(Runnable r){r.run();}
++ public TdlibSettingsManager settings(){return settings;}
++ public TdApi.Chat chat(long id){return chats.get(id);}
++ public void chat(long id,Future<TdApi.Function<?>> f,RunnableData<TdApi.Chat> callback){callback.runWithData(chat(id));}
++}''',
++ 'org/thunderdog/challegram/telegram/TdlibChatList.java': '''package org.thunderdog.challegram.telegram;
++import java.util.*; import org.drinkless.tdlib.TdApi; import me.vkryl.core.lambda.*;
++public class TdlibChatList {
++ public static class Entry implements Comparable<Entry> {
++  public TdApi.Chat chat; public TdApi.ChatList chatList; public TdApi.ChatPosition effectivePosition;
++  public Entry(TdApi.Chat c,TdApi.ChatList l,TdApi.ChatPosition p){chat=c;chatList=l;effectivePosition=new TdApi.ChatPosition(); if(p!=null)effectivePosition.order=p.order;}
++  public int compareTo(Entry o){return effectivePosition.order != o.effectivePosition.order ? Long.compare(o.effectivePosition.order,effectivePosition.order) : Long.compare(o.chat.id,chat.id);}
++ }
++ TdApi.ChatList list = new TdApi.ChatList(); Tdlib td; List<Entry> entries=new ArrayList<>(); ChatListListener listener; boolean end; Runnable pending; int requests;
++ public TdlibChatList(Tdlib td){this.td=td;}
++ public TdApi.ChatList chatList(){return list;} public boolean canLoad(){return !end;} public boolean isEndReached(){return end;}
++ public RuntimeException origin(){return null;} public int count(Filter<TdApi.Chat> f){int n=0;for(Entry e:entries)if(f==null||f.accept(e.chat))n++;return n;}
++ public void initializeList(Filter<TdApi.Chat> f,ChatListListener l,RunnableData<List<Entry>> cb,int n,Runnable done){listener=l;List<Entry> copy=new ArrayList<>();for(Entry e:entries)if(f.accept(e.chat))copy.add(e);cb.runWithData(copy);done.run();}
++ public void loadAtLeast(Filter<TdApi.Chat> f,int min,int desired,Runnable done){requests++;pending=done;}
++ public void unsubscribeFromUpdates(ChatListListener l){listener=null;}
++ public void add(long id,boolean notify){TdApi.Chat c=new TdApi.Chat(id);td.chats.put(id,c);entries.add(new Entry(c,list,c.position)); if(notify&&listener!=null)listener.onChatAdded(this,c,entries.size()-1,new Tdlib.ChatChange(c.position,15));}
++}''',
++ 'org/thunderdog/challegram/telegram/SliceTest.java': '''package org.thunderdog.challegram.telegram;
++import java.util.*; import org.drinkless.tdlib.TdApi;
++public class SliceTest {
++ static void check(boolean b,String s){if(!b)throw new AssertionError(s);}
++ static class Display implements ChatListListener {
++  List<Long> ids=new ArrayList<>();
++  public void onChatAdded(TdlibChatList l,TdApi.Chat c,int i,Tdlib.ChatChange ch){ids.add(i,c.id);}
++  public void onChatRemoved(TdlibChatList l,TdApi.Chat c,int i,Tdlib.ChatChange ch){check(ids.remove(i)==c.id,"correct removal index");}
++  public void onChatMoved(TdlibChatList l,TdApi.Chat c,int i,int j,Tdlib.ChatChange ch){check(ids.remove(i)==c.id,"correct move index");ids.add(j,c.id);}
++  void append(List<TdlibChatListSlice.Entry> entries){for(var e:entries)ids.add(e.chat.id);}
++ }
++ public static void main(String[] args){
++  Tdlib td=new Tdlib();TdlibChatList source=new TdlibChatList(td);
++  for(int i=1;i<=400;i++)source.add(i,false);source.end=true;
++  td.settings.hide(1,true);
++  TdlibChatListSlice slice=new TdlibChatListSlice(td,source,null,false,null);Display d=new Display();
++  slice.initializeList(d,d::append,40,null);
++  check(d.ids.size()==40&&!d.ids.contains(1L),"initial visible page excludes hidden");
++  td.settings.hide(2,true);check(!d.ids.contains(2L)&&d.ids.size()==40,"hide fills visible gap");
++  td.settings.hide(1,false);check(d.ids.get(0)==1L,"unhide returns correct order");
++  td.settings.hide(300,true);td.settings.hide(300,false);
++  check(!d.ids.contains(300L),"unhide outside visible page does not render distant row");
++  slice.loadMore(40,null);check(d.ids.size()==80,"cached next page");
++  slice.performDestroy();check(td.settings.listeners.isEmpty(),"listener released");
++
++  td=new Tdlib();source=new TdlibChatList(td);source.add(1,false);source.add(2,false);
++  slice=new TdlibChatListSlice(td,source,null,false,null);d=new Display();slice.initializeList(d,d::append,2,null);
++  final int[] callbacks={0};slice.loadMore(40,()->callbacks[0]++);slice.loadMore(40,()->callbacks[0]++);
++  check(source.requests==1,"duplicate scroll requests coalesce");
++  for(int i=3;i<=82;i++)source.add(i,true);
++  check(d.ids.size()==42,"duplicate scroll does not inflate page limit");
++  source.pending.run();check(callbacks[0]==2,"all completion callbacks delivered");
++  slice.performDestroy();System.out.println("PASS: real slice with TDLib doubles: pagination, hide/unhide, coalescing, cleanup");
++ }
++}'''
++}
++with tempfile.TemporaryDirectory() as tmp:
++    folder = Path(tmp)
++    for name, content in fixtures.items():
++        path = folder / name
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(content)
++    sources = [str(folder / name) for name in fixtures]
++    sources.append(str(root / 'app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java'))
++    subprocess.run(['java', 'com.sun.tools.javac.Main', '-d', tmp, *sources], check=True)
++    subprocess.run(['java', '-cp', tmp, 'org.thunderdog.challegram.telegram.SliceTest'], check=True)
+diff --git a/tests/sviri/run_checks.py b/tests/sviri/run_checks.py
+new file mode 100644
+index 0000000..6f1ab23
+--- /dev/null
++++ b/tests/sviri/run_checks.py
+@@ -0,0 +1,47 @@
++#!/usr/bin/env python3
++"""Run standalone Java checks without downloading Gradle or Android SDK."""
++from pathlib import Path
++import subprocess
++import tempfile
++import xml.etree.ElementTree as ET
++
++root = Path(__file__).resolve().parents[2]
++package = root / 'app/src/main/java/org/thunderdog/challegram'
++tests = Path(__file__).resolve().parent
++with tempfile.TemporaryDirectory() as tmp:
++    subprocess.run(['java', 'com.sun.tools.javac.Main', '-d', tmp,
++                    str(package / 'telegram/HiddenChatStore.java'),
++                    str(package / 'telegram/HiddenCounterProjection.java'),
++                    str(package / 'telegram/ChatLoadRetry.java'),
++                    str(tests / 'VisibilityCoreTest.java'),
++                    str(tests / 'HiddenChatStoreTest.java'),
++                    str(tests / 'ParseSources.java')], check=True)
++    subprocess.run(['java', '-cp', tmp, 'HiddenChatStoreTest'], check=True)
++    subprocess.run(['java', '-cp', tmp, 'VisibilityCoreTest'], check=True)
++    modified = subprocess.check_output(['git', 'diff', '--name-only'], cwd=root, text=True).splitlines()
++    untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=root, text=True).splitlines()
++    sources = [str(root / path) for path in dict.fromkeys(modified + untracked)
++               if path.startswith('app/src/main/java/') and path.endswith('.java')]
++    subprocess.run(['java', '-cp', tmp, 'ParseSources', *sources], check=True)
++
++for relative in ('app/src/main/res/values/ids.xml', 'app/src/main/res/values/strings.xml'):
++    tree = ET.parse(root / relative)
++    names = [entry.get('name') for entry in tree.getroot()]
++    assert len(names) == len(set(names)), f'duplicate resource in {relative}'
++print('PASS: XML resources parse and have unique names')
++theme_root = root / 'app/src/main/other/themes'
++definitions = ET.parse(theme_root / 'colors-and-properties.xml').getroot()
++allowed = {
++    '@': {item.get('name') for item in definitions.find('properties')},
++    '#': {item.get('name') for item in definitions.find('colors')},
++}
++section = None
++for line in (theme_root / 'swiryyyyX Dark.tgx-theme').read_text().splitlines():
++    if line in ('!', '@', '#'):
++        section = line
++    elif section in allowed and ':' in line:
++        names = {name.strip() for name in line.split(':', 1)[0].split(',')}
++        assert names <= allowed[section], f'unknown theme entries: {names - allowed[section]}'
++assert definitions.find('settings/default-theme/dark').text == '12'
++print('PASS: swiryyyyX theme entries and default dark theme')
++subprocess.run(['git', 'diff', '--check'], cwd=root, check=True)
