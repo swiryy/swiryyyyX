@@ -150,6 +150,28 @@ index 52ec143..069f49e 100644
        }
        setTextValue(b.toString(), !entities.isEmpty() ? entities.toArray(new TextEntity[0]) : null, false);
        setPrefix();
+diff --git a/app/src/main/java/org/thunderdog/challegram/navigation/MenuMoreWrap.java b/app/src/main/java/org/thunderdog/challegram/navigation/MenuMoreWrap.java
+index 3d431b6..e99716e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/navigation/MenuMoreWrap.java
++++ b/app/src/main/java/org/thunderdog/challegram/navigation/MenuMoreWrap.java
+@@ -122,14 +122,10 @@ public class MenuMoreWrap extends MenuMoreWrapAbstract implements Animated {
+     this.forcedTheme = forcedTheme;
+ 
+     setMinimumWidth(Screen.dp(196f));
+-    Drawable drawable;
+-    if (forcedTheme != null) {
+-      drawable = ViewSupport.getDrawableFilter(getContext(), R.drawable.bg_popup_fixed, new PorterDuffColorFilter(forcedTheme.getColor(ColorId.overlayFilling), PorterDuff.Mode.MULTIPLY));
+-    } else {
+-      drawable = ViewSupport.getDrawableFilter(getContext(), R.drawable.bg_popup_fixed, new PorterDuffColorFilter(Theme.headerFloatBackgroundColor(), PorterDuff.Mode.MULTIPLY));
+-    }
++    android.graphics.drawable.GradientDrawable drawable = new android.graphics.drawable.GradientDrawable();
++    drawable.setColor(forcedTheme != null ? forcedTheme.getColor(ColorId.overlayFilling) : Theme.headerFloatBackgroundColor());
++    drawable.setCornerRadius(Screen.dp(16));
+     ViewUtils.setBackground(this, drawable);
+-
+     if (themeProvider != null && forcedTheme == null) {
+       themeProvider.addThemeSpecialFilterListener(drawable, ColorId.overlayFilling);
+       themeProvider.addThemeInvalidateListener(this);
 diff --git a/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java b/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java
 index d993d4f..e99b5cb 100644
 --- a/app/src/main/java/org/thunderdog/challegram/navigation/TelegramViewController.java
@@ -1044,10 +1066,20 @@ index b789b70..7d3aca9 100644
      String localKey = "tgx_ns_" + tdlib.id() + "_" + localChatId;
      IconCompat chatIcon = U.isValidBitmap(icon) ? IconCompat.createWithBitmap(icon) : null;
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-index ba92082..488421c 100644
+index ba92082..466c117 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-@@ -131,6 +131,87 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -127,10 +127,97 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+     this.tdlib = tdlib;
+ 
+     load();
++    Settings prefs = Settings.instance();
++    String migrationKey = key("sviri_nicegram_theme_v1", tdlib.id());
++    if (!prefs.getBoolean(migrationKey, false)) {
++      replaceThemeId(ThemeId.NIGHT_BLUE, 12);
++      prefs.putBoolean(migrationKey, true);
++    }
+ 
      tdlib.listeners().addCleanupListener(this);
    }
  
@@ -1135,7 +1167,7 @@ index ba92082..488421c 100644
    private void load () {
      // FIXME
    }
-@@ -158,6 +239,10 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -158,6 +245,10 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      editor.remove(key(THEME_CHAT_STYLE_KEY, accountId));
      editor.remove(key(PLAIN_CHANNEL_KEY, accountId));
      editor.remove(key(PREFERENCES_KEY, accountId));
@@ -1166,6 +1198,19 @@ index 3f0cccf..c9a225e 100644
      if (params != null && params.highlightMessageId != null) {
        params.highlightMessageId = new MessageId(chatFinal.id, params.highlightMessageId.getMessageId(), params.highlightMessageId.getOtherMessageIds());
      }
+diff --git a/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java b/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java
+index a3d4511..030d33a 100644
+--- a/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java
++++ b/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java
+@@ -45,7 +45,7 @@ import me.vkryl.core.MathUtils;
+ import me.vkryl.core.reference.ReferenceList;
+ 
+ public class ThemeManager implements FactorAnimator.Target, GlobalAccountListener {
+-  public static final int DEFAULT_DARK_THEME = ThemeId.NIGHT_BLUE;
++  public static final int DEFAULT_DARK_THEME = 12;
+   public static final int DEFAULT_LIGHT_THEME = ThemeId.CLASSIC;
+   public static final int DEFAULT_THEME = DEFAULT_DARK_THEME;
+ 
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
 index 9f7fc1a..2d41071 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
@@ -1180,7 +1225,7 @@ index 9f7fc1a..2d41071 100644
        return unreadCounter;
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
-index 070ed21..36d90df 100644
+index 070ed21..2afcee0 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 @@ -156,7 +156,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
@@ -1222,7 +1267,7 @@ index 070ed21..36d90df 100644
          tdlib.settings().addUserPreferenceChangeListener(this);
        }
      }
-@@ -1333,12 +1333,16 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1333,7 +1333,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
          }
        }
  
@@ -1231,16 +1276,42 @@ index 070ed21..36d90df 100644
          ids.append(R.id.more_btn_selectAll);
          strings.append(R.string.SelectMore);
          icons.append(R.drawable.baseline_playlist_add_check_24);
-       }
+@@ -1393,6 +1393,34 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+       strings.append(R.string.DeleteChatCache);
+       icons.append(R.drawable.templarian_baseline_broom_24);
  
++      if (selectedChats.size() == 1) {
++        ids = new IntList(5);
++        strings = new StringList(5);
++        icons = new IntList(5);
++        int pinMode = canPinUnpinSelectedChats();
++        if (shouldShowPin(pinMode)) {
++          ids.append(R.id.menu_btn_pinUnpin);
++          strings.append(pinMode == ACTION_MODE_ALL_ENABLED ? R.string.UnpinFromTop : R.string.PinToTop);
++          icons.append(pinMode == ACTION_MODE_ALL_ENABLED ? R.drawable.deproko_baseline_pin_undo_24 : R.drawable.deproko_baseline_pin_24);
++        }
++        if (Settings.instance().chatFoldersEnabled()) {
++          ids.append(R.id.more_btn_addToFolder);
++          strings.append(R.string.AddToFolder);
++          icons.append(R.drawable.templarian_baseline_folder_plus_24);
++        }
++        ids.append(canMarkAsRead > 0 ? R.id.more_btn_markAsRead : R.id.more_btn_markAsUnread);
++        strings.append(canMarkAsRead > 0 ? R.string.MarkAsRead : R.string.MarkAsUnread);
++        icons.append(canMarkAsRead > 0 ? Config.ICON_MARK_AS_READ : Config.ICON_MARK_AS_UNREAD);
++        if (canClearHistory == 1) {
++          ids.append(R.id.more_btn_clearHistory);
++          strings.append(R.string.ClearHistory);
++          icons.append(R.drawable.templarian_baseline_broom_24);
++        }
++      }
 +      ids.append(R.id.more_btn_hideChat);
 +      strings.append(R.string.SviriHideChat);
 +      icons.append(R.drawable.baseline_eye_off_24);
 +
-       if (canArchive + canUnarchive > 0) {
-         ids.append(canUnarchive > 0 ? R.id.more_btn_unarchive : R.id.more_btn_archive);
-         strings.append(canUnarchive > 0 ? R.string.Unarchive : R.string.Archive);
-@@ -1701,7 +1705,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+       getParentOrSelf().showMore(ids.get(), strings.get(), icons.get());
+     } else if (id == R.id.menu_btn_pinUnpin) {
+       int mode = canPinUnpinSelectedChats();
+@@ -1701,7 +1729,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onMoreItemPressed (int id) {
@@ -1254,7 +1325,7 @@ index 070ed21..36d90df 100644
        long[] selectedChatIds = ArrayUtils.keys(selectedChats);
        tdlib.ui().showAddChatsToFolderOptions(this, selectedChatIds, this::onSelectionActionComplete);
        // break;
-@@ -1869,7 +1878,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1869,7 +1902,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
        strings.append(R.string.SelectAll);
        icons.append(R.drawable.baseline_playlist_add_check_24);
  
@@ -1263,7 +1334,7 @@ index 070ed21..36d90df 100644
          ids.append(R.id.btn_selectUnread);
          strings.append(R.string.SelectUnread);
          icons.append(Config.ICON_MARK_AS_UNREAD);
-@@ -1881,11 +1890,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1881,11 +1914,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
        showOptions(Lang.getString(R.string.SelectMore), ids.get(), strings.get(), null, icons.get(), (v, optionId) -> {
          if (optionId == R.id.btn_selectAll) {
@@ -1278,7 +1349,7 @@ index 070ed21..36d90df 100644
          }
          return true;
        });
-@@ -2046,7 +2055,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2046,7 +2079,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void requestLoadMore () {
@@ -1287,7 +1358,7 @@ index 070ed21..36d90df 100644
    }
  
    // Search mode
-@@ -2079,7 +2088,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2079,7 +2112,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    protected boolean filterChatMessageSearchResult (TdApi.Chat chat) {
@@ -1296,7 +1367,7 @@ index 070ed21..36d90df 100644
    }
  
    @Override
-@@ -3002,6 +3011,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -3002,6 +3035,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
@@ -1363,7 +1434,7 @@ index aa708d3..614f3d1 100644
  
    @Override
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-index f81e95e..772d64f 100644
+index f81e95e..9b47d2a 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 @@ -22,6 +22,9 @@ import android.content.Intent;
@@ -1387,10 +1458,13 @@ index f81e95e..772d64f 100644
      if (bottomBar != null) {
        int height = Math.round(extraBottomInsetWithoutIme * (1f - (updateSnackBar != null ? updateSnackBar.getVisibilityFactor() : 0)));
        Views.setBottomMargin(bottomBar, height);
-@@ -207,6 +214,81 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -207,6 +214,94 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      }
    }
  
++  private org.thunderdog.challegram.widget.AvatarView sviriAvatar;
++  private LinearLayout sviriHeader;
++  private SviriPill sviriFolders;
 +  private TextView sviriSearch;
 +  private LinearLayout sviriNavigation;
 +
@@ -1443,6 +1517,10 @@ index f81e95e..772d64f 100644
 +    addSviriTab(context, R.string.Settings, R.drawable.baseline_settings_24, false, () -> navigateTo(new SettingsController(context, tdlib)));
 +    addSviriTab(context, R.string.SviriProfile, R.drawable.baseline_person_24, false, () -> tdlib.ui().openPrivateProfile(this, tdlib.myUserId(), null));
 +    mainWrap.addView(sviriNavigation, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(64), Gravity.BOTTOM, Screen.dp(12), 0, Screen.dp(12), Screen.dp(12) + extraBottomInsetWithoutIme));
++    sviriFolders = new SviriPill(context);
++    addThemeInvalidateListener(sviriFolders);
++    mainWrap.addView(sviriFolders, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(38), Gravity.TOP, Screen.dp(12), Screen.dp(64), Screen.dp(12), 0));
++    checkTabs();
 +    checkPagerMargins();
 +  }
 +
@@ -1462,6 +1540,12 @@ index f81e95e..772d64f 100644
 +    TextViewCompat.setCompoundDrawableTintList(tab, ColorStateList.valueOf(Theme.getColor(color)));
 +    addThemeTextColorListener(tab, color);
 +    addThemeCompoundDrawableColorListener(tab, color);
++    if (active) {
++      android.graphics.drawable.GradientDrawable selected = new android.graphics.drawable.GradientDrawable();
++      selected.setColor(0x22339FED);
++      selected.setCornerRadius(Screen.dp(28));
++      tab.setBackground(selected);
++    }
 +    tab.setOnClickListener(v -> action.run());
 +    sviriNavigation.addView(tab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
 +  }
@@ -1469,7 +1553,7 @@ index f81e95e..772d64f 100644
    @Override
    protected void onCreateView (Context context, FrameLayoutFix contentView, ViewPager pager) {
      if (BuildConfig.DEBUG) {
-@@ -221,6 +303,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -221,6 +316,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      mainWrap.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
      mainWrap.addView(pagerWrap);
      generateChatSearchView(mainWrap);
@@ -1477,10 +1561,85 @@ index f81e95e..772d64f 100644
  
      contentView.addView(mainWrap);
  
-@@ -797,12 +880,18 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -391,42 +487,28 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+ 
+   @Override
+   public View getCustomHeaderCell () {
+-    if (displayTabsAtBottom()) {
+-      if (useGlobalFilter()) {
+-        if (toggleHeaderView == null) {
+-          toggleHeaderView = new ToggleHeaderView2(context);
+-          toggleHeaderView.setTextTop(17f);
+-          toggleHeaderView.setTriangleTop(16f);
+-          toggleHeaderView.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(56f), Gravity.TOP, Screen.dp(56f), 0, Screen.dp(68f), 0));
+-          toggleHeaderView.setOnClickListener(v -> showGlobalFilter());
+-          toggleHeaderView.setOnLongClickListener(v -> applyGlobalFilter(FILTER_NONE));
+-          toggleHeaderView.setTitle(Lang.getString(getGlobalFilterName(globalFilter)), /* animated */ false);
+-          toggleHeaderView.setColorSet(new ToggleHeaderView2.ColorSet() {
+-            @Override
+-            public int titleColor () {
+-              return getHeaderTextColor();
+-            }
+-
+-            @SuppressLint("WrongConstant")
+-            @Override
+-            public int iconColorId () {
+-              return getHeaderIconColorId();
+-            }
+-          });
+-          addThemeInvalidateListener(toggleHeaderView);
+-        }
+-        return toggleHeaderView;
+-      }
+-      return null;
+-    }
+-    if (headerCell != null) {
+-      View headerCellView = headerCell.getView();
+-      if (bottomBar != null && headerCellView.getParent() == bottomBar) {
+-        return null;
+-      }
+-      return headerCellView;
+-    }
+-    return null;
++    if (sviriHeader == null) {
++      sviriHeader = new LinearLayout(context);
++      sviriHeader.setGravity(Gravity.CENTER_VERTICAL);
++      sviriHeader.setPadding(Screen.dp(14), 0, Screen.dp(8), 0);
++      sviriHeader.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(56), Gravity.TOP, 0, 0, Screen.dp(49), 0));
++      sviriAvatar = new org.thunderdog.challegram.widget.AvatarView(context);
++      sviriAvatar.setUser(tdlib, tdlib.myUserId(), false);
++      sviriAvatar.setContentDescription(Lang.getString(R.string.SviriProfile));
++      sviriAvatar.setOnClickListener(v -> tdlib.ui().openPrivateProfile(this, tdlib.myUserId(), null));
++      sviriHeader.addView(sviriAvatar, new LinearLayout.LayoutParams(Screen.dp(36), Screen.dp(36)));
++      TextView title = new AppCompatTextView(context);
++      title.setText(Lang.getString(R.string.AppName));
++      title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
++      title.setTextColor(Theme.getColor(ColorId.headerText));
++      addThemeTextColorListener(title, ColorId.headerText);
++      LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
++      titleParams.leftMargin = Screen.dp(10);
++      title.setGravity(Gravity.CENTER_VERTICAL);
++      title.setOnClickListener(v -> showGlobalFilter());
++      sviriHeader.addView(title, titleParams);
++    }
++    return sviriHeader;
+   }
+ 
+   // Menu
+@@ -513,7 +595,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   private @Nullable ViewPagerTopView.Item buildSectionItem (long pagerItemId, int pagerItemPosition) {
+     final ViewPagerTopView.Item item;
+     if (hasFolders()) {
+-      int chatFolderStyle = tdlib.settings().chatFolderStyle();
++      int chatFolderStyle = ChatFolderStyle.LABEL_ONLY;
+       if (pagerItemId == MAIN_PAGER_ITEM_ID) {
+         item = buildMainSectionItem(pagerItemPosition, chatFolderStyle);
+       } else if (pagerItemId == ARCHIVE_PAGER_ITEM_ID) {
+@@ -797,12 +879,20 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    protected void onEnterSearchMode () {
      super.onEnterSearchMode();
      composeWrap.forceHide();
++    sviriFolders.setVisibility(View.GONE);
 +    sviriSearchPill.setVisibility(View.GONE);
 +    sviriNavigation.setVisibility(View.GONE);
 +    checkPagerMargins();
@@ -1490,13 +1649,14 @@ index f81e95e..772d64f 100644
    protected void onLeaveSearchMode () {
      super.onLeaveSearchMode();
      composeWrap.showIfWasHidden();
++    sviriFolders.setVisibility(View.VISIBLE);
 +    sviriSearchPill.setVisibility(View.VISIBLE);
 +    sviriNavigation.setVisibility(View.VISIBLE);
 +    checkPagerMargins();
    }
  
    /*@Override
-@@ -1013,7 +1102,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -1013,7 +1103,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
  
    private void checkComposeWrapPaddings () {
      if (composeWrap != null) {
@@ -1505,20 +1665,69 @@ index f81e95e..772d64f 100644
        composeWrap.setPadding(composeWrap.getPaddingLeft(), composeWrap.getPaddingTop(), composeWrap.getPaddingRight(), paddingBottom);
        composeWrap.setClipToPadding(paddingBottom == 0);
      }
-@@ -1027,6 +1116,12 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -1027,6 +1117,12 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        Views.setBottomMargin(getViewPager(), 0);
        Views.setBottomMargin(pagerWrap, 0);
      }
 +    if (sviriNavigation != null) {
 +      boolean visible = sviriNavigation.getVisibility() == View.VISIBLE;
-+      Views.setTopMargin(pagerWrap, visible ? Screen.dp(64) : 0);
++      Views.setTopMargin(pagerWrap, visible ? Screen.dp(110) : 0);
 +      int bottom = visible ? Screen.dp(80) + extraBottomInsetWithoutIme : 0;
 +      Views.setBottomMargin(pagerWrap, bottom + (updateSnackBar != null ? Math.round(updateSnackBar.getHeight() * updateSnackBar.getVisibilityFactor()) : 0));
 +    }
    }
  
    private void checkHeaderMargins () {
-@@ -1824,7 +1919,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -1040,28 +1136,9 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+       params.rightMargin = 0;
+       recyclerView.setLayoutParams(params);
+     }
+-    int paddingLeft, paddingRight;
+-    if (displayTabsAtBottom()) {
+-      paddingLeft = paddingRight = 0;
+-      recyclerView.setPadding(0, 0, 0, 0);
+-    } else {
+-      recyclerView.setClipToPadding(false);
+-      recyclerView.setPadding(Screen.dp(12), 0, Screen.dp(12), 0);
+-      int menuWidth = Screen.dp(44f);
+-      if (Passcode.instance().isEnabled()) {
+-        menuWidth += Screen.dp(48f);
+-      }
+-      if (Lang.rtl()) {
+-        paddingLeft = menuWidth;
+-        paddingRight = Screen.dp(44f);
+-      } else {
+-        paddingLeft = Screen.dp(44f);
+-        paddingRight = menuWidth;
+-      }
+-    }
+-    if (headerCellView.getPaddingLeft() != paddingLeft || headerCellView.getPaddingRight() != paddingRight) {
+-      headerCellView.setPadding(paddingLeft, headerCellView.getPaddingTop(), paddingRight, headerCellView.getPaddingBottom());
+-    }
++    recyclerView.setClipToPadding(false);
++    recyclerView.setPadding(Screen.dp(8), 0, Screen.dp(8), 0);
++    headerCellView.setPadding(0, 0, 0, 0);
+   }
+ 
+   private SnackBar updateSnackBar;
+@@ -1121,6 +1198,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+ 
+   @Override
+   public void destroy () {
++    if (sviriAvatar != null) sviriAvatar.performDestroy();
+     super.destroy();
+     tdlib.listeners().removeOptionListener(this);
+     context().appUpdater().removeListener(this);
+@@ -1363,7 +1441,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+ 
+   @Override
+   protected int getBackButton () {
+-    return BackHeaderButton.TYPE_MENU;
++    return BackHeaderButton.TYPE_NONE;
+   }
+ 
+   @Override
+@@ -1824,7 +1902,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
          .callback(unreadCounterCallback(MAIN_PAGER_ITEM_ID))
          .build();
        unreadCounterColorSet.setCounter(unreadCounter);
@@ -1527,7 +1736,7 @@ index f81e95e..772d64f 100644
        defaultCounterListener = new CounterChangeListener() {
          @Override
          public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
-@@ -1847,7 +1942,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -1847,7 +1925,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
              });
            } else if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
              executeOnUiThreadOptional(() -> {
@@ -1536,7 +1745,172 @@ index f81e95e..772d64f 100644
              });
            }
          }
-@@ -2991,7 +3086,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -1884,8 +1962,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   @Override
+   public void fillMenuItems (int id, HeaderView header, LinearLayout menu) {
+     if (id == R.id.menu_main) {
+-      header.addLockButton(menu);
+-      header.addSearchButton(menu, this);
++      header.addMoreButton(menu, this);
+     } else if (id == R.id.menu_clear) {
+       header.addClearButton(menu, getSearchHeaderIconColorId(), getSearchBackButtonResource());
+     } else {
+@@ -1895,7 +1972,19 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+ 
+   @Override
+   public void onMenuItemPressed (int id, View view) {
+-    if (id == R.id.menu_btn_search) {
++    if (inSelectMode()) {
++      super.onMenuItemPressed(id, view);
++      return;
++    }
++    if (id == R.id.menu_btn_more) {
++      showMore(new int[] {R.id.btn_hiddenChats, R.id.menu_btn_settings},
++        new String[] {Lang.getString(R.string.SviriHiddenChats), Lang.getString(R.string.Settings)},
++        new int[] {R.drawable.baseline_eye_off_24, R.drawable.baseline_settings_24});
++    } else if (id == R.id.btn_hiddenChats) {
++      navigateTo(new SettingsHiddenChatsController(context, tdlib));
++    } else if (id == R.id.menu_btn_settings) {
++      navigateTo(new SettingsController(context, tdlib));
++    } else if (id == R.id.menu_btn_search) {
+       tdlib.checkDeadlocks(() -> runOnUiThreadOptional(() -> {
+         if (isFocused()) {
+           openSearchMode();
+@@ -2435,7 +2524,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+     }
+     if (isFolder) {
+       options.item(new OptionItem(R.id.btn_editFolder, Lang.getString(R.string.EditFolder), OptionColor.NORMAL, R.drawable.baseline_edit_24));
+-      int chatFolderStyle = tdlib.settings().chatFolderStyle();
++      int chatFolderStyle = ChatFolderStyle.LABEL_ONLY;
+       if (hasIcon(chatFolderStyle)) {
+         options.item(new OptionItem(R.id.btn_changeFolderIcon, Lang.getString(R.string.ChatFolderChangeIcon), OptionColor.NORMAL, R.drawable.baseline_image_24));
+       }
+@@ -2769,89 +2858,23 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   }
+ 
+   private void checkTabs () {
+-    if (headerCell == null)
+-      return;
+-    ViewPagerHeaderViewCompact headerCellView = (ViewPagerHeaderViewCompact) headerCell.getView();
+-    boolean hasFolders = hasFolders();
+-    boolean displayTabsAtBottom = displayTabsAtBottom();
+-    headerCell.getTopView().setAnimateItemChanges(!Settings.instance().needReduceMotion());
+-    headerCell.getTopView().setShowLabelOnActiveOnly(hasFolders && tdlib.settings().chatFolderStyle() == ChatFolderStyle.ICON_WITH_LABEL_ON_ACTIVE_FOLDER);
+-    headerCell.getTopView().setUseDarkBackground(displayTabsAtBottom);
+-    headerCell.getTopView().setDrawSelectionAtTop(displayTabsAtBottom);
+-    headerCell.getTopView().setSlideOffDirection(displayTabsAtBottom ? ViewPagerTopView.SLIDE_OFF_DIRECTION_TOP : ViewPagerTopView.SLIDE_OFF_DIRECTION_BOTTOM);
+-    headerCell.getTopView().setItemPadding(Screen.dp(hasFolders ? ViewPagerTopView.COMPACT_ITEM_PADDING : ViewPagerTopView.DEFAULT_ITEM_PADDING));
+-    headerCell.getTopView().setItemSpacing(Screen.dp(hasFolders ? ViewPagerTopView.COMPACT_ITEM_SPACING : ViewPagerTopView.DEFAULT_ITEM_SPACING));
+-    headerCellView.setFadingEdgeLength(displayTabsAtBottom ? 0f : 16f);
+-
+-    if (displayTabsAtBottom) {
+-      if (bottomBar == null) {
+-        ViewGroup parent = (ViewGroup) headerCellView.getParent();
+-        if (parent != null) {
+-          if (headerView != null && isFocused() && !inTransformMode()) {
+-            headerView.setTitle(this);
+-            View titleView = headerView.findViewById(getId());
+-            if (titleView != null) {
+-              titleView.setAlpha(1f);
+-              titleView.setTranslationX(0);
+-              titleView.setTranslationY(0);
+-              titleView.setVisibility(View.VISIBLE);
+-            }
+-          } else {
+-            parent.removeView(headerCellView);
+-          }
+-        }
+-        int shadowHeight = Screen.dp(3f);
+-        ShadowView shadowView = new ShadowView(context);
+-        shadowView.setVerticalShadow(new int[]{0x00000000, 0x40000000}, null, shadowHeight);
+-        shadowView.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, shadowHeight));
+-        Views.setTopMargin(headerCellView, shadowHeight - Screen.dp(1f));
+-
+-        ViewSupport.setThemedBackground(headerCellView, ColorId.headerLightBackground, this);
+-        headerCell.getTopView().setSelectionColorId(ColorId.headerLightText, .9f);
+-        headerCell.getTopView().setTextFromToColorId(ColorId.headerLightText, ColorId.headerLightText, PropertyId.SUBTITLE_ALPHA);
+-
+-        int headerHeight = getHeaderHeight();
+-        bottomBar = new FrameLayoutFix(context);
+-        bottomBar.addView(shadowView);
+-        bottomBar.addView(headerCellView);
+-        pagerWrap.addView(bottomBar, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, headerHeight + Views.getTopMargin(headerCellView), Gravity.BOTTOM));
+-
+-        bottomBarSpace = new FillingSpace(context);
+-        bottomBarSpace.setThemedBackground(ColorId.headerLightBackground, this);
+-        pagerWrap.addView(bottomBarSpace, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, Gravity.BOTTOM));
+-
+-        updateBottomBarMargins();
+-
+-        if (Config.CHAT_FOLDERS_HIDE_BOTTOM_BAR_ON_SCROLL) {
+-          isBottomBarVisible.setValue(true, false);
+-          invalidateBottomBarOffset();
+-        }
+-      }
+-      headerCellView.setAlpha(1f);
+-      headerCellView.setTranslationX(0f);
+-      headerCellView.setTranslationY(0f);
+-      headerCellView.setVisibility(View.VISIBLE);
+-      headerCellView.setScaleFactor(0f, 0f, 0f, false);
+-    } else {
+-      if (bottomBar != null) {
+-        pagerWrap.removeView(bottomBar);
+-        pagerWrap.removeView(bottomBarSpace);
+-        bottomBarSpace.performDestroy();
+-        bottomBar.removeView(headerCellView);
+-        bottomBar = null;
+-        bottomBarSpace = null;
+-        if (Config.CHAT_FOLDERS_HIDE_BOTTOM_BAR_ON_SCROLL) {
+-          isBottomBarVisible.setValue(false, false);
+-        }
+-        headerCell.getTopView().setSelectionColorId(ColorId.headerTabActive);
+-        headerCell.getTopView().setTextFromToColorId(ColorId.headerTabInactiveText, ColorId.headerTabActiveText);
+-        ViewUtils.setBackground(headerCellView, null);
+-        Views.setTopMargin(headerCellView, 0);
+-        if (headerView != null && isFocused() && !inTransformMode()) {
+-          headerView.setTitle(this);
+-        }
+-      }
+-    }
++    if (headerCell == null || sviriFolders == null) return;
++    ViewPagerHeaderViewCompact folders = (ViewPagerHeaderViewCompact) headerCell.getView();
++    ViewGroup parent = (ViewGroup) folders.getParent();
++    if (parent != sviriFolders) {
++      if (parent != null) parent.removeView(folders);
++      sviriFolders.addView(folders, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
++    }
++    folders.setPadding(Screen.dp(8), 0, Screen.dp(8), 0);
++    folders.setFadingEdgeLength(12f);
++    headerCell.getTopView().setShowLabelOnActiveOnly(false);
++    headerCell.getTopView().setUseDarkBackground(false);
++    headerCell.getTopView().setDrawSelectionAtTop(false);
++    headerCell.getTopView().setItemPadding(Screen.dp(12));
++    headerCell.getTopView().setItemSpacing(Screen.dp(4));
++    headerCell.getTopView().setSelectionColorId(ColorId.textLink);
++    headerCell.getTopView().setTextFromToColorId(ColorId.textPlaceholder, ColorId.textLink);
++    folders.setVisibility(View.VISIBLE);
+   }
+ 
+   private void checkMenu () {
+@@ -2872,7 +2895,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   }
+ 
+   private boolean displayTabsAtBottom () {
+-    return hasFolders() && !tdlib.settings().displayFoldersAtTop();
++    return false;
+   }
+ 
+   private void initPagerSections () {
+@@ -2912,7 +2935,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+       } else {
+         archiveChatListPosition = NO_POSITION;
+       }
+-      @ChatFolderStyle int chatFolderStyle = tdlib.settings().chatFolderStyle();
++      @ChatFolderStyle int chatFolderStyle = ChatFolderStyle.LABEL_ONLY;
+       chatLists = new ArrayList<>(chatListCount);
+       sections = new ArrayList<>(chatListCount);
+       int chatFolderIndex = 0;
+@@ -2991,7 +3014,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      int selectedFilter = getSelectedFilter(pagerItemId);
      Counter unreadCounter = buildUnreadCounter(pagerItemId, selectedFilter);
      if (unreadCounter != null) {
@@ -1545,7 +1919,7 @@ index f81e95e..772d64f 100644
        updateCounter(chatList, unreadCounter, counter, /* animated */ false);
      }
      boolean showIcon = hasIcon(chatFolderStyle) || (pagerItemId == MAIN_PAGER_ITEM_ID && pagerItemPosition == 0);
-@@ -3042,6 +3137,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3042,6 +3065,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    public static void updateCounter (Tdlib tdlib, TdApi.ChatList chatList, Counter target, TdlibCounter counter, boolean animated) {
@@ -1553,7 +1927,7 @@ index f81e95e..772d64f 100644
      int mutedCount, unmutedCount;
      int badgeFlags = tdlib.settings().getChatFolderBadgeFlags();
      boolean countMessages = BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_MESSAGES);
-@@ -3053,7 +3149,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3053,7 +3077,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        unmutedCount = Math.max(0, counter.chatUnmutedCount);
      }
      if (BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED) && chatList.getConstructor() == TdApi.ChatListMain.CONSTRUCTOR) {
@@ -1562,7 +1936,7 @@ index f81e95e..772d64f 100644
        if (countMessages) {
          mutedCount += Math.max(0, archiveCounter.messageCount);
          unmutedCount += Math.max(0, archiveCounter.messageUnmutedCount);
-@@ -3202,7 +3298,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3202,7 +3226,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
          }
          dispatchCounter(chatList, counter);
          if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
@@ -1571,7 +1945,7 @@ index f81e95e..772d64f 100644
          }
        });
      }
-@@ -3224,7 +3320,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3224,7 +3248,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        TdApi.ChatList chatList = pagerChatLists.get(i);
        ViewPagerTopView.Item section = pagerSections.get(i);
        if (section.counter != null) {
@@ -1720,7 +2094,7 @@ index 795c154..9cd6609 100644
 +</xml>
 diff --git a/app/src/main/other/themes/swiryyyyX Dark.tgx-theme b/app/src/main/other/themes/swiryyyyX Dark.tgx-theme
 new file mode 100644
-index 0000000..747d567
+index 0000000..a013a63
 --- /dev/null
 +++ b/app/src/main/other/themes/swiryyyyX Dark.tgx-theme	
 @@ -0,0 +1,17 @@
@@ -1736,7 +2110,7 @@ index 0000000..747d567
 +imageCorner: 16
 +#
 +background, filling, headerBackground, chatBackground: #191919
-+headerLightBackground, bubbleIn_background, bubbleOut_background: #252525
++overlayFilling, headerLightBackground, bubbleIn_background, bubbleOut_background: #252525
 +text, headerText, headerLightText: #FFFFFF
 +textLight, textPlaceholder, chatListIcon, chatListMute: #939393
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
