@@ -84,7 +84,32 @@ jobs:
         working-directory: source
         run: |
           chmod +x gradlew
-          ./gradlew assembleLatestArm64Debug --console=plain --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8' '-Dkotlin.daemon.jvm.options=-Xmx2g'
+          ./gradlew assembleLatestArm64Debug --console=plain --no-daemon --max-workers=2 --info --stacktrace -Dorg.gradle.internal.http.connectionTimeout=30000 -Dorg.gradle.internal.http.socketTimeout=60000 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8' '-Dkotlin.daemon.jvm.options=-Xmx2g' &
+          build_pid=$!
+          (
+            ticks=0
+            while kill -0 "$build_pid" 2>/dev/null; do
+              sleep 60
+              ticks=$((ticks + 1))
+              echo "::group::Runner health after $ticks minutes"
+              ps -eo pid,comm,pcpu,pmem --sort=-pcpu | head -12
+              df -h /
+              if [ $((ticks % 5)) -eq 0 ]; then
+                daemon_pid=$(jps -l | awk '$2 ~ /GradleDaemon/ {print $1; exit}')
+                if [ -n "$daemon_pid" ]; then
+                  timeout 20 jcmd "$daemon_pid" Thread.print || true
+                fi
+              fi
+              echo "::endgroup::"
+            done
+          ) &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
+          set +e
+          wait "$build_pid"
+          build_exit=$?
+          kill "$monitor_pid" 2>/dev/null || true
+          exit "$build_exit
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
