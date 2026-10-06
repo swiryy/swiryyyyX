@@ -1267,7 +1267,7 @@ index 9f7fc1a..2d41071 100644
        return unreadCounter;
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
-index 070ed21..24aedd0 100644
+index 070ed21..f275551 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 @@ -156,7 +156,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
@@ -1422,12 +1422,29 @@ index 070ed21..24aedd0 100644
 -          tdlib.ui().showChatOptions(this, chatList(), chat.getChatId(), null, new TdApi.MessageSourceChatList(), canSelectChat(chat), isChatSelected(chat), () -> selectUnselectChat(chat, true));
 +          if (canSelectChat(chat)) {
 +            if (!isChatSelected(chat)) selectUnselectChat(chat, true);
-+            onMenuItemPressed(R.id.menu_btn_more, v);
++            showHeldChatMenu(chat.getChatId(), v, 0);
 +          }
          }
          return true;
        }
-@@ -3002,6 +3044,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2255,6 +2297,16 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+     return false;
+   }
+ 
++  private void showHeldChatMenu (long chatId, View anchor, int attempt) {
++    if (isDestroyed() || selectedChats == null || selectedChats.indexOfKey(chatId) < 0 || !getParentOrSelf().inSelectMode()) return;
++    // Header selection animates before showMore is allowed to open a popup.
++    if (context.isNavigationBusy()) {
++      if (attempt < 60) anchor.postDelayed(() -> showHeldChatMenu(chatId, anchor, attempt + 1), 16L);
++      return;
++    }
++    onMenuItemPressed(R.id.menu_btn_more, anchor);
++  }
++
+   private LongSparseArray<TdApi.Chat> selectedChats;
+ 
+   private int getSelectedChatCount () {
+@@ -3002,6 +3054,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
