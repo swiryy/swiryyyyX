@@ -2534,7 +2534,7 @@ index 0000000..0097add
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
-index 0000000..2ae5106
+index 0000000..72da59a
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 @@ -0,0 +1,302 @@
@@ -2584,7 +2584,7 @@ index 0000000..2ae5106
 +  private boolean balanceLoading;
 +  private int giftCount;
 +  private final Consumer<TdApi.StarAmount> balanceListener = value -> {
-+    if (!isDestroyed() && adapter != null && profile) adapter.notifyItemChanged(0);
++    if (!isDestroyed() && adapter != null) adapter.notifyItemChanged(0);
 +  };
 +  private void loadBalance () {
 +    if (balanceLoading || isDestroyed()) return;
