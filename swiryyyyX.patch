@@ -1066,7 +1066,7 @@ index b789b70..7d3aca9 100644
      String localKey = "tgx_ns_" + tdlib.id() + "_" + localChatId;
      IconCompat chatIcon = U.isValidBitmap(icon) ? IconCompat.createWithBitmap(icon) : null;
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-index ba92082..466c117 100644
+index ba92082..357e11b 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
 @@ -127,10 +127,97 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
@@ -1076,7 +1076,7 @@ index ba92082..466c117 100644
 +    Settings prefs = Settings.instance();
 +    String migrationKey = key("sviri_nicegram_theme_v1", tdlib.id());
 +    if (!prefs.getBoolean(migrationKey, false)) {
-+      replaceThemeId(ThemeId.NIGHT_BLUE, 12);
++      replaceThemeId(ThemeId.NIGHT_BLUE, ThemeId.SWIRYYYY_X_DARK);
 +      prefs.putBoolean(migrationKey, true);
 +    }
  
@@ -1199,7 +1199,7 @@ index 3f0cccf..c9a225e 100644
        params.highlightMessageId = new MessageId(chatFinal.id, params.highlightMessageId.getMessageId(), params.highlightMessageId.getOtherMessageIds());
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java b/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java
-index a3d4511..030d33a 100644
+index a3d4511..44c6f09 100644
 --- a/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java
 +++ b/app/src/main/java/org/thunderdog/challegram/theme/ThemeManager.java
 @@ -45,7 +45,7 @@ import me.vkryl.core.MathUtils;
@@ -1207,10 +1207,31 @@ index a3d4511..030d33a 100644
  
  public class ThemeManager implements FactorAnimator.Target, GlobalAccountListener {
 -  public static final int DEFAULT_DARK_THEME = ThemeId.NIGHT_BLUE;
-+  public static final int DEFAULT_DARK_THEME = 12;
++  public static final int DEFAULT_DARK_THEME = ThemeId.SWIRYYYY_X_DARK;
    public static final int DEFAULT_LIGHT_THEME = ThemeId.CLASSIC;
    public static final int DEFAULT_THEME = DEFAULT_DARK_THEME;
  
+diff --git a/app/src/main/java/org/thunderdog/challegram/theme/ThemeSet.java b/app/src/main/java/org/thunderdog/challegram/theme/ThemeSet.java
+index 6b19a36..9533211 100644
+--- a/app/src/main/java/org/thunderdog/challegram/theme/ThemeSet.java
++++ b/app/src/main/java/org/thunderdog/challegram/theme/ThemeSet.java
+@@ -28,6 +28,7 @@ import org.thunderdog.challegram.theme.builtin.ThemeOrange;
+ import org.thunderdog.challegram.theme.builtin.ThemePink;
+ import org.thunderdog.challegram.theme.builtin.ThemeRed;
+ import org.thunderdog.challegram.theme.builtin.ThemeWhiteBlack;
++import org.thunderdog.challegram.theme.builtin.ThemeswiryyyyXDark;
+ import org.thunderdog.challegram.unsorted.Settings;
+ 
+ public class ThemeSet {
+@@ -105,6 +106,8 @@ public class ThemeSet {
+       case ThemeId.WHITE_BLACK:
+         return new ThemeWhiteBlack();
+ 
++      case ThemeId.SWIRYYYY_X_DARK:
++        return new ThemeswiryyyyXDark();
+       case ThemeId.NIGHT_BLUE:
+         return new ThemeNightBlue();
+       case ThemeId.NIGHT_BLACK:
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
 index 9f7fc1a..2d41071 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatFoldersFeatureController.java
@@ -1433,6 +1454,41 @@ index aa708d3..614f3d1 100644
    // Updates
  
    @Override
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java b/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java
+index e903305..bfa950c 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java
+@@ -1035,7 +1035,7 @@ public class IntroController extends ViewController<Void> implements GLSurfaceVi
+     textLayout.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+     textWrap.addView(textLayout);
+ 
+-    params = FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(48f), Gravity.BOTTOM);
++    params = FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(52f), Gravity.BOTTOM);
+     params.bottomMargin = params.leftMargin = params.rightMargin = Screen.dp(16f);
+     button = new NoScrollTextView(context) {
+       @Override
+@@ -1067,9 +1067,9 @@ public class IntroController extends ViewController<Void> implements GLSurfaceVi
+     button.setOnClickListener(this);
+     button.setOnLongClickListener(this);
+     button.setLayoutParams(params);
+-    button.setTextColor(Theme.getColor(ColorId.textNeutral));
+-    addThemeTextColorListener(button, ColorId.textNeutral);
+-    RippleSupport.setSimpleWhiteBackground(button);
++    button.setTextColor(Theme.getColor(ColorId.circleButtonRegularIcon));
++    addThemeTextColorListener(button, ColorId.circleButtonRegularIcon);
++    RippleSupport.setSimpleWhiteBackground(button, ColorId.circleButtonRegular, 26f, this);
+     textWrap.addView(button);
+ 
+     progressAnimator = new BoolAnimator(0, new FactorAnimator.Target() {
+@@ -1411,7 +1411,7 @@ public class IntroController extends ViewController<Void> implements GLSurfaceVi
+ 
+   private String getTitle (int pos) {
+     if (titles[pos] == null) {
+-      return (titles[pos] = getString(getTitleString(pos, false)));
++      return (titles[pos] = getString(pos == 0 ? R.string.AppName : getTitleString(pos, false)));
+     }
+     return titles[pos];
+   }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 index f81e95e..9b47d2a 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
@@ -2483,6 +2539,91 @@ index 0000000..7673641
 +    sources.append(str(root / 'app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java'))
 +    subprocess.run(['java', 'com.sun.tools.javac.Main', '-d', tmp, *sources], check=True)
 +    subprocess.run(['java', '-cp', tmp, 'org.thunderdog.challegram.telegram.SliceTest'], check=True)
+diff --git a/tests/sviri/check_themes.py b/tests/sviri/check_themes.py
+new file mode 100644
+index 0000000..131900f
+--- /dev/null
++++ b/tests/sviri/check_themes.py
+@@ -0,0 +1,79 @@
++#!/usr/bin/env python3
++"""Execute the production theme loader against generated-theme dependency stubs.
++
++This catches built-in themes that compile successfully but fall through to the
++custom-theme branch at startup. Android rendering is outside this test's scope.
++"""
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++root = Path(__file__).resolve().parents[2]
++package = 'org.thunderdog.challegram.theme'
++source = root / 'app/src/main/java/org/thunderdog/challegram/theme/ThemeSet.java'
++themes = []
++for path in (root / 'app/src/main/other/themes').glob('*.tgx-theme'):
++    content = path.read_text()
++    theme_id = int(re.search(r'^id: (\d+)', content, re.M).group(1))
++    name = re.search(r'^name: "([^"]+)"', content, re.M)
++    name = name.group(1) if name else path.stem
++    class_name = name.replace(' ', '')
++    constant = ''.join(('_' if i and c.isupper() else '') + c.upper()
++                       for i, c in enumerate(class_name))
++    themes.append((theme_id, class_name, constant))
++with tempfile.TemporaryDirectory() as tmp:
++    tmp = Path(tmp)
++    def write(name, text):
++        path = tmp / (name.replace('.', '/') + '.java')
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(text)
++    for annotation in ('ColorInt', 'NonNull'):
++        write('androidx.annotation.' + annotation,
++              'package androidx.annotation; public @interface ' + annotation + ' {}')
++    constants = '\n'.join(f'int {name} = {i};' for i, _, name in themes)
++    write(package + '.ThemeId', f'package {package}; public @interface ThemeId {{'
++          + 'int NONE = 0, TEMPORARY = -1, CUSTOM = -2, ID_MIN = 1, COUNT = 12;'
++          + constants + '}')
++    for annotation in ('ColorId', 'PropertyId'):
++        write(package + '.' + annotation,
++              f'package {package}; public @interface {annotation} {{ int WALLPAPER_ID = 0; }}')
++    write(package + '.ThemeDelegate', f'package {package}; public class ThemeDelegate {{'
++          + 'private final int id; public ThemeDelegate(int id) { this.id = id; }'
++          + 'public int getColor(int c) { return id; } public float getProperty(int p) { return id; }'
++          + 'public String getDefaultWallpaper() { return "theme-" + id; }}')
++    write(package + '.ThemeManager', f'package {package}; public class ThemeManager {{'
++          + 'public static int resolveCustomThemeId(int id) { return 100 + id; }}')
++    write(package + '.TGBackground', f'package {package}; public class TGBackground {{'
++          + 'public static String getBackgroundForLegacyWallpaperId(int id) { return "legacy"; }}')
++    write('org.thunderdog.challegram.unsorted.Settings', '''package org.thunderdog.challegram.unsorted;
++import org.thunderdog.challegram.theme.ThemeDelegate;
++public class Settings {
++ public static Settings instance() { return new Settings(); }
++ public int getCustomThemeColor(int t, int c) { return -1; }
++ public float getCustomThemeProperty(int t, int p) { return -1; }
++ public String getCustomThemeWallpaper(int t) { return null; }
++ public ThemeDelegate loadCustomTheme(int t) { throw new AssertionError("Unexpected custom theme " + t); }
++}''')
++    for theme_id, name, _ in themes:
++        # Blue is the source theme and the generator calls it ThemeDefault.
++        generated = 'ThemeDefault' if name == 'Blue' else 'Theme' + name
++        write(package + '.builtin.' + generated,
++              f'package {package}.builtin; public class {generated} extends {package}.ThemeDelegate {{'
++              + f'public {generated}() {{ super({theme_id}); }}' + '}')
++    write(package + '.ThemeSet', source.read_text())
++    ids = ','.join(str(i) for i, _, _ in themes)
++    write('ThemeLoaderTest', f'''import {package}.ThemeSet;
++public class ThemeLoaderTest {{
++ public static void main(String[] args) {{
++  for (int id : new int[] {{{ids}}}) {{
++   if (ThemeSet.getColor(id, 0) != id) throw new AssertionError("Wrong theme " + id);
++   if (ThemeSet.getProperty(id, 0) != id) throw new AssertionError("Wrong property " + id);
++   if (!ThemeSet.getDefaultWallpaper(id).equals("theme-" + id)) throw new AssertionError("Wrong wallpaper");
++  }}
++  System.out.println("PASS: all 12 built-in themes load, including the default swiryyyyX theme");
++ }}
++}}''')
++    subprocess.run(['java', 'com.sun.tools.javac.Main', '-d', str(tmp),
++                    *map(str, tmp.rglob('*.java'))], check=True)
++    subprocess.run(['java', '-cp', str(tmp), 'ThemeLoaderTest'], check=True)
 diff --git a/tests/sviri/run_checks.py b/tests/sviri/run_checks.py
 new file mode 100644
 index 0000000..f33765b
