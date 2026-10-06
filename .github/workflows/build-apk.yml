@@ -92,7 +92,7 @@ jobs:
               sleep 60
               ticks=$((ticks + 1))
               echo "::group::Runner health after $ticks minutes"
-              ps -eo pid,comm,pcpu,pmem --sort=-pcpu | head -12
+              ps -eo pid,comm,pcpu,pmem --sort=-pcpu | head -12 || true
               df -h /
               if [ $((ticks % 5)) -eq 0 ]; then
                 daemon_pid=$(jps -l | awk '$2 ~ /GradleDaemon/ {print $1; exit}')
@@ -109,7 +109,7 @@ jobs:
           wait "$build_pid"
           build_exit=$?
           kill "$monitor_pid" 2>/dev/null || true
-          exit "$build_exit
+          exit "$build_exit"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
