@@ -1546,7 +1546,7 @@ index e903305..bfa950c 100644
      return titles[pos];
    }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-index f81e95e..9b47d2a 100644
+index f81e95e..c7c4c41 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 @@ -22,6 +22,9 @@ import android.content.Intent;
@@ -1627,7 +1627,7 @@ index f81e95e..9b47d2a 100644
 +    });
 +    addSviriTab(context, R.string.SviriTab, R.drawable.baseline_eye_off_24, false, () -> navigateTo(new SettingsHiddenChatsController(context, tdlib)));
 +    addSviriTab(context, R.string.Settings, R.drawable.baseline_settings_24, false, () -> navigateTo(new SettingsController(context, tdlib)));
-+    addSviriTab(context, R.string.SviriProfile, R.drawable.baseline_person_24, false, () -> tdlib.ui().openPrivateProfile(this, tdlib.myUserId(), null));
++    addSviriTab(context, R.string.SviriProfile, R.drawable.baseline_person_24, false, () -> navigateTo(new SviriProfileController(context, tdlib, true)));
 +    mainWrap.addView(sviriNavigation, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(64), Gravity.BOTTOM, Screen.dp(12), 0, Screen.dp(12), Screen.dp(12) + extraBottomInsetWithoutIme));
 +    sviriFolders = new SviriPill(context);
 +    addThemeInvalidateListener(sviriFolders);
@@ -2067,7 +2067,7 @@ index f81e95e..9b47d2a 100644
        }
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
-index 30a74d2..82fcb35 100644
+index 30a74d2..ace1fe1 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
 @@ -637,6 +637,12 @@ public class SettingsController extends ViewController<Void> implements
@@ -2083,12 +2083,13 @@ index 30a74d2..82fcb35 100644
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_privacySettings, R.drawable.baseline_lock_24, R.string.PrivacySettings));
      items.add(new ListItem(ListItem.TYPE_SEPARATOR));
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_stickerSettingsAndEmoji, R.drawable.deproko_baseline_stickers_filled_24, R.string.StickersAndEmoji));
-@@ -1229,6 +1235,10 @@ public class SettingsController extends ViewController<Void> implements
+@@ -1229,6 +1235,11 @@ public class SettingsController extends ViewController<Void> implements
        navigateTo(c);
      } else if (viewId == R.id.btn_chatSettings) {
        navigateTo(new SettingsDataController(context, tdlib));
 +    } else if (viewId == R.id.btn_sviriStars || viewId == R.id.btn_sviriGifts) {
-+      navigateTo(new SettingsStarsController(context, tdlib, viewId == R.id.btn_sviriGifts));
++      if (viewId == R.id.btn_sviriGifts) navigateTo(new SviriProfileController(context, tdlib, false));
++      else navigateTo(new SettingsStarsController(context, tdlib, false));
 +    } else if (viewId == R.id.btn_hiddenChats) {
 +      navigateTo(new SettingsHiddenChatsController(context, tdlib));
      } else if (viewId == R.id.btn_privacySettings) {
@@ -2313,6 +2314,241 @@ index 0000000..34423ba
 +    }
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
+new file mode 100644
+index 0000000..37c5b67
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
+@@ -0,0 +1,229 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.content.Context;
++import android.graphics.drawable.GradientDrawable;
++import android.view.Gravity;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import androidx.recyclerview.widget.GridLayoutManager;
++import androidx.recyclerview.widget.RecyclerView;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.component.sticker.StickerSmallView;
++import org.thunderdog.challegram.component.sticker.TGStickerObj;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.theme.Theme;
++import org.thunderdog.challegram.theme.ColorId;
++import org.thunderdog.challegram.tool.Screen;
++import org.thunderdog.challegram.v.CustomRecyclerView;
++import org.thunderdog.challegram.widget.AvatarView;
++import java.util.ArrayList;
++import java.util.HashSet;
++
++/** Own profile and received gift gallery, independent of Saved Messages media. */
++public final class SviriProfileController extends RecyclerViewController<Void> {
++  private final boolean profile;
++  private final ArrayList<TdApi.ReceivedGift> gifts = new ArrayList<>();
++  private final HashSet<String> seen = new HashSet<>();
++  private final ArrayList<Card> cards = new ArrayList<>();
++  private final ArrayList<AvatarView> avatars = new ArrayList<>();
++  private GalleryAdapter adapter;
++  private String offset = "", error;
++  private boolean loading, loaded;
++  private int generation;
++  private String bio = "";
++
++  public SviriProfileController (Context context, Tdlib tdlib, boolean profile) {
++    super(context, tdlib); this.profile = profile;
++  }
++  @Override public int getId () { return R.id.controller_sviriGifts; }
++  @Override public CharSequence getName () { return Lang.getString(profile ? R.string.SviriProfile : R.string.SviriGifts); }
++  @Override protected void onCreateView (Context context, CustomRecyclerView recycler) {
++    GridLayoutManager grid = new GridLayoutManager(context, 2);
++    grid.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
++      @Override public int getSpanSize (int position) { return adapter.getItemViewType(position) == 1 ? 1 : 2; }
++    });
++    recycler.setLayoutManager(grid);
++    recycler.setPadding(Screen.dp(10), Screen.dp(8), Screen.dp(10), Screen.dp(16));
++    recycler.setClipToPadding(false);
++    recycler.setItemAnimator(null);
++    adapter = new GalleryAdapter();
++    recycler.setAdapter(adapter);
++    recycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
++      @Override public void onScrolled (RecyclerView view, int dx, int dy) {
++        if (dy > 0 && grid.findLastVisibleItemPosition() >= adapter.getItemCount() - 5 && error == null && !offset.isEmpty()) load();
++      }
++    });
++    load();
++    if (profile) tdlib.client().send(new TdApi.GetUserFullInfo(tdlib.myUserId()), result -> runOnUiThreadOptional(() -> {
++      if (!isDestroyed() && result instanceof TdApi.UserFullInfo) {
++        TdApi.FormattedText value = ((TdApi.UserFullInfo) result).bio;
++        bio = value != null ? value.text : "";
++        update();
++      }
++    }));
++  }
++  private void load () {
++    if (loading || isDestroyed() || (loaded && offset.isEmpty() && error == null)) return;
++    loading = true; error = null; update();
++    int token = generation;
++    TdApi.GetReceivedGifts request = new TdApi.GetReceivedGifts();
++    request.businessConnectionId = "";
++    request.ownerId = new TdApi.MessageSenderUser(tdlib.myUserId());
++    // All kinds: ordinary, limited, upgradable and upgraded gifts.
++    request.offset = offset; request.limit = 30;
++    tdlib.client().send(request, result -> runOnUiThreadOptional(() -> {
++      if (isDestroyed() || token != generation) return;
++      loading = false;
++      if (result instanceof TdApi.ReceivedGifts) {
++        TdApi.ReceivedGifts page = (TdApi.ReceivedGifts) result;
++        for (TdApi.ReceivedGift gift : page.gifts) {
++          if ((gift.gift instanceof TdApi.SentGiftRegular || gift.gift instanceof TdApi.SentGiftUpgraded) && seen.add(gift.receivedGiftId)) gifts.add(gift);
++        }
++        offset = page.nextOffset; loaded = true;
++      } else error = result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse);
++      update();
++    }));
++  }
++  private void update () { if (adapter != null && !isDestroyed()) adapter.notifyDataSetChanged(); }
++  private TextView text (Context context, CharSequence value, int size) {
++    TextView view = new TextView(context);
++    view.setText(value); view.setTextSize(size); view.setTextColor(Theme.getColor(ColorId.text));
++    view.setGravity(Gravity.CENTER); view.setPadding(Screen.dp(12), Screen.dp(10), Screen.dp(12), Screen.dp(10));
++    return view;
++  }
++  private LinearLayout column (Context context) {
++    LinearLayout view = new LinearLayout(context); view.setOrientation(LinearLayout.VERTICAL); view.setGravity(Gravity.CENTER);
++    view.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++    return view;
++  }
++  private void showGift (TdApi.ReceivedGift received) {
++    if (received.gift instanceof TdApi.SentGiftUpgraded) {
++      TdApi.UpgradedGift gift = ((TdApi.SentGiftUpgraded) received.gift).gift;
++      String details = gift.title + " #" + gift.number + "\n" + Lang.getString(R.string.SviriGiftModel) + ": " + gift.model.name + "\n" + Lang.getString(R.string.SviriGiftSymbol) + ": " + gift.symbol.name + "\n" + Lang.getString(R.string.SviriGiftBackdrop) + ": " + gift.backdrop.name;
++      showOptions(details, new int[]{R.id.btn_sviriOpenGift, R.id.btn_cancel}, new String[]{Lang.getString(R.string.SviriOpenGift), Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.dotvhs_baseline_gift_24, R.drawable.baseline_cancel_24}, (view, id) -> {
++        if (id == R.id.btn_sviriOpenGift) tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null);
++        return true;
++      });
++    } else {
++      TdApi.Gift gift = ((TdApi.SentGiftRegular) received.gift).gift;
++      String caption = gift.sticker.emoji + " · " + gift.starCount + " ★";
++      if (received.text != null && !received.text.text.isEmpty()) caption += "\n" + received.text.text;
++      showOptions(caption, new int[]{R.id.btn_cancel}, new String[]{Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.baseline_cancel_24}, (view, id) -> true);
++    }
++  }
++  private final class Card extends RecyclerView.ViewHolder {
++    final StickerSmallView sticker;
++    final TextView title, subtitle;
++    final LinearLayout panel;
++    Card (Context context) {
++      super(column(context));
++      LinearLayout outer = (LinearLayout) itemView;
++      outer.setPadding(Screen.dp(5), Screen.dp(5), Screen.dp(5), Screen.dp(5));
++      panel = column(context);
++      panel.setPadding(0, Screen.dp(6), 0, Screen.dp(8));
++      outer.addView(panel);
++      sticker = new StickerSmallView(context) {
++        @Override public boolean onTouchEvent (android.view.MotionEvent event) { return false; }
++      };
++      sticker.init(tdlib); sticker.setForceHeight(Screen.dp(122));
++      panel.addView(sticker, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(122)));
++      title = text(context, "", 14); title.setMaxLines(2);
++      subtitle = text(context, "", 12);
++      panel.addView(title); panel.addView(subtitle);
++      cards.add(this);
++    }
++    void bind (TdApi.ReceivedGift received) {
++      TdApi.Sticker image;
++      int start = Theme.getColor(ColorId.filling), end = start, foreground = Theme.getColor(ColorId.text);
++      if (received.gift instanceof TdApi.SentGiftUpgraded) {
++        TdApi.UpgradedGift gift = ((TdApi.SentGiftUpgraded) received.gift).gift;
++        image = gift.model.sticker;
++        start = 0xff000000 | gift.backdrop.colors.centerColor;
++        end = 0xff000000 | gift.backdrop.colors.edgeColor;
++        foreground = 0xff000000 | gift.backdrop.colors.textColor;
++        title.setText(gift.title); subtitle.setText("#" + gift.number);
++      } else {
++        TdApi.Gift gift = ((TdApi.SentGiftRegular) received.gift).gift;
++        image = gift.sticker; title.setText(image.emoji + " " + Lang.getString(R.string.SviriReceivedGift));
++        subtitle.setText(gift.starCount + " ★");
++      }
++      GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{start, end});
++      background.setCornerRadius(Screen.dp(20)); panel.setBackground(background);
++      title.setTextColor(foreground); subtitle.setTextColor(foreground);
++      TGStickerObj object = new TGStickerObj(tdlib, image, null, image.fullType);
++      // Native first-frame decoding: no continuously running animations in the grid.
++      if (object.getPreviewAnimation() != null) object.getPreviewAnimation().setIsStill(true);
++      sticker.setSticker(object);
++      panel.setOnClickListener(view -> showGift(received));
++      panel.setContentDescription(title.getText() + " " + subtitle.getText());
++    }
++  }
++  private final class GalleryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
++    int prefix () { return profile ? 2 : 1; }
++    @Override public int getItemCount () { return prefix() + gifts.size() + 1; }
++    @Override public int getItemViewType (int position) {
++      if (profile && position == 0) return 0;
++      if (position < prefix()) return 2;
++      return position < prefix() + gifts.size() ? 1 : 3;
++    }
++    @Override public RecyclerView.ViewHolder onCreateViewHolder (ViewGroup parent, int type) {
++      Context context = parent.getContext();
++      if (type == 1) return new Card(context);
++      LinearLayout wrap = column(context);
++      if (type == 0) {
++        AvatarView avatar = new AvatarView(context); avatar.setUser(tdlib, tdlib.myUserId(), false);
++        avatars.add(avatar); wrap.addView(avatar, new LinearLayout.LayoutParams(Screen.dp(104), Screen.dp(104)));
++        wrap.addView(text(context, tdlib.cache().userName(tdlib.myUserId()), 24));
++        TextView stars = text(context, Lang.getString(R.string.SviriStars) + " ★", 16);
++        stars.setTextColor(Theme.getColor(ColorId.textLink));
++        stars.setOnClickListener(view -> navigateTo(new SettingsStarsController(context, tdlib, false)));
++        wrap.addView(stars);
++        wrap.addView(text(context, "", 15));
++        TextView settings = text(context, Lang.getString(R.string.Settings), 15);
++        settings.setTextColor(Theme.getColor(ColorId.textLink));
++        settings.setOnClickListener(view -> navigateTo(new SettingsController(context, tdlib)));
++        wrap.addView(settings);
++      } else wrap.addView(text(context, "", type == 2 ? 20 : 15));
++      return new RecyclerView.ViewHolder(wrap) {};
++    }
++    @Override public void onBindViewHolder (RecyclerView.ViewHolder holder, int position) {
++      int type = getItemViewType(position);
++      if (type == 1) ((Card) holder).bind(gifts.get(position - prefix()));
++      else if (type == 0) {
++        LinearLayout wrap = (LinearLayout) holder.itemView;
++        TdApi.User user = tdlib.cache().user(tdlib.myUserId());
++        String username = user != null && user.usernames != null && user.usernames.activeUsernames.length > 0 ? "@" + user.usernames.activeUsernames[0] : "";
++        TextView about = (TextView) wrap.getChildAt(3);
++        about.setText(username + (!username.isEmpty() && !bio.isEmpty() ? "\n" : "") + bio);
++        about.setVisibility(username.isEmpty() && bio.isEmpty() ? View.GONE : View.VISIBLE);
++      } else {
++        TextView label = (TextView) ((LinearLayout) holder.itemView).getChildAt(0);
++        if (type == 2) label.setText(Lang.getString(R.string.SviriGifts));
++        else {
++          label.setText(loading ? Lang.getString(R.string.LoadingInformation) : error != null ? error + "\n" + Lang.getString(R.string.SviriRetry) : !offset.isEmpty() ? Lang.getString(R.string.SviriLoadMore) : gifts.isEmpty() ? Lang.getString(R.string.SviriNoGifts) : Lang.getString(R.string.SviriRefresh));
++          holder.itemView.setOnClickListener(view -> {
++            if (loading) return;
++            if (error != null || !offset.isEmpty()) load();
++            else { generation++; gifts.clear(); seen.clear(); loaded = false; offset = ""; load(); }
++          });
++        }
++      }
++    }
++    @Override public void onViewAttachedToWindow (RecyclerView.ViewHolder holder) { if (holder instanceof Card) ((Card) holder).sticker.attach(); }
++    @Override public void onViewDetachedFromWindow (RecyclerView.ViewHolder holder) { if (holder instanceof Card) ((Card) holder).sticker.detach(); }
++    @Override public void onViewRecycled (RecyclerView.ViewHolder holder) { if (holder instanceof Card) ((Card) holder).sticker.setSticker(null); }
++  }
++  @Override public void destroy () {
++    generation++;
++    for (Card card : cards) card.sticker.performDestroy();
++    for (AvatarView avatar : avatars) avatar.performDestroy();
++    cards.clear(); avatars.clear();
++    super.destroy();
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java b/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java
 index fea87b1..7c6a7cd 100644
 --- a/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java
@@ -2403,7 +2639,7 @@ index 98ed3d2..db0a51e 100644
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..bb25f4e 100644
+index 416f9af..b7f46d5 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -2422,12 +2658,15 @@ index 416f9af..bb25f4e 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,18 @@
+@@ -5909,4 +5919,21 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
 +  <string name="SviriStars">Telegram Stars</string>
-+  <string name="SviriCollectibleGifts">Collectible gifts</string>
++  <string name="SviriCollectibleGifts">Gifts</string>
++  <string name="SviriGifts">Gifts</string>
++  <string name="SviriReceivedGift">Received gift</string>
++  <string name="SviriNoGifts">No received gifts yet</string>
 +  <string name="SviriStarsBalance">Balance</string>
 +  <string name="SviriRefund">Refund</string>
 +  <string name="SviriUnexpectedResponse">Unable to load this response. Try again.</string>
