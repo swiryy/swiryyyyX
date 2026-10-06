@@ -53,6 +53,9 @@ jobs:
           git -C source submodule update --init --recursive --depth=1 --jobs 4
           git -C source/tdlib lfs pull
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - name: Install pinned Android components
         run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;27.3.13750724' 'ndk;23.2.8568313'
       - name: Configure personal client
