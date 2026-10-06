@@ -55,9 +55,18 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+          cmdline-tools-version: 15859902
           log-accepted-android-sdk-licenses: false
       - name: Install pinned Android components
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;27.3.13750724' 'ndk;23.2.8568313'
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import subprocess
+          props = dict(line.split('=', 1) for line in Path('source/version.properties').read_text().splitlines() if '=' in line and not line.lstrip().startswith('#'))
+          packages = ['platforms;' + props['version.sdk_package'], 'build-tools;' + props['version.build_tools'], 'ndk;' + props['version.ndk_primary'], 'ndk;' + props['version.ndk_legacy'], 'cmake;' + props['version.cmake']]
+          print('Installing pinned SDK packages:', ', '.join(packages), flush=True)
+          subprocess.run(['sdkmanager', *packages], check=True)
+          PYCODE
       - name: Configure personal client
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
