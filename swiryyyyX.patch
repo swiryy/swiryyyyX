@@ -1546,7 +1546,7 @@ index e903305..bfa950c 100644
      return titles[pos];
    }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-index f81e95e..c7c4c41 100644
+index f81e95e..7c31569 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 @@ -22,6 +22,9 @@ import android.content.Intent;
@@ -1721,7 +1721,7 @@ index f81e95e..c7c4c41 100644
 +      sviriAvatar = new org.thunderdog.challegram.widget.AvatarView(context);
 +      sviriAvatar.setUser(tdlib, tdlib.myUserId(), false);
 +      sviriAvatar.setContentDescription(Lang.getString(R.string.SviriProfile));
-+      sviriAvatar.setOnClickListener(v -> tdlib.ui().openPrivateProfile(this, tdlib.myUserId(), null));
++      sviriAvatar.setOnClickListener(v -> navigateTo(new SviriProfileController(context, tdlib, true)));
 +      sviriHeader.addView(sviriAvatar, new LinearLayout.LayoutParams(Screen.dp(36), Screen.dp(36)));
 +      TextView title = new AppCompatTextView(context);
 +      title.setText(Lang.getString(R.string.AppName));
