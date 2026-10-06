@@ -1,72 +1,28 @@
 diff --git a/SVIRI_STATUS.md b/SVIRI_STATUS.md
 new file mode 100644
-index 0000000..541fd4a
+index 0000000..ac3a32f
 --- /dev/null
 +++ b/SVIRI_STATUS.md
-@@ -0,0 +1,63 @@
-+# swiryyyyX — код для наступної збірки
+@@ -0,0 +1,19 @@
++# swiryyyyX — оновлення 2026-10-06
 +
-+Це пакет змін до Telegram X, а не готовий APK. Назва застосунку: **swiryyyyX**. Android, особисте користування.
++Попередня ARM64-збірка GitHub Actions #5 успішно скомпільована. Нові зміни потребують окремої Android-збірки та перевірки на телефоні.
 +
-+## Реалізовано в коді
++## Нові зміни
 +
-+- Окреме локальне сховище прихованих чатів для кожного акаунта. Масове приховування записується однією операцією, без часткової зміни стану після помилки запису.
-+- «Hide chat» у меню виділених чатів; звичайний розділ «Приховані чати» у налаштуваннях без PIN. Там можна відкрити чат або повернути його до списку.
-+- Фільтрація списків, папок, результатів пошуку чатів і повідомлень, списку контактів для вибору переписки та прев’ю архіву.
-+- Локальна проєкція лічильників основного списку, архіву, папок і значка застосунку без зміни серверного стану. Після запуску запитується відсутня метаінформація прихованих чатів, а не їхня історія.
-+- Приховані сповіщення й звук, очищення Android shortcuts та повторна перевірка перед показом сповіщення після завантаження медіа.
-+- Відкриття прихованих чатів через звичайні посилання обмежене; дозволене відкриття з налаштувань і продовження вже відкритої переписки.
-+- Початкова порція до 50 чатів, довантаження з урахуванням прихованих рядків, об’єднання одночасних запитів прокручування. Тимчасові мережеві помилки мають затримку повтору 1–30 секунд і не позначають список завершеним.
-+- Прибирання підписок після закриття списку та знищення пошуку.
-+- Початкова темна палітра swiryyyyX за скриншотами Nicegram: майже чорне тло, темні поверхні, сині акценти, округлені повідомлення. Вона є типовою темною темою.
-+- Шаблон конфігурації з назвою swiryyyyX та окремим package ID ua.swiryyyyx.client; сценарій запуску Windows-збірки.
++- Особисті й секретні чати запам’ятовуються окремо для кожного акаунта та відновлюються через GetChat з бази TDLib до звичайної прокрутки. Особисті чати мають пріоритет перед малими групами; максимум 16 паралельних запитів.
++- Групи з відомою кількістю 1–200 учасників також входять у цей індекс. Канали й групи понад 200 не входять. Зміна кількості учасників оновлює індекс; невідому кількість не вважаємо малою групою.
++- Перший вхід потребує фонового проходу метаданих основного списку та архіву порціями по 50. TDLib не надає окремої команди отримання лише невідомих особистих чатів. Це не завантаження історій чи медіа каналів. Відображення списку залишається порційним, порядок чатів не змінюється.
++- Додано нативний округлений пошук і капсульну навігацію: Chats, Contacts, swiryyyyX (приховані чати), Settings, Profile. Пошук запускає штатний пошук TGX; Contacts відкриває штатний вибір контакту для переписки. Панель приховується під час пошуку, враховує нижній системний відступ. Заголовок переписки та точна копія компонування Nicegram ще не завершені.
++- Hide chat доступний через довге натискання на чат → меню вибраних чатів. Відкрити/повернути: Settings → Приховані чати або середня кнопка swiryyyyX.
 +
-+Приховування діє лише в цьому клієнті. Інші Telegram-клієнти бачать чат. Це функція інтерфейсу, без парольного захисту. Дані та серверні налаштування сповіщень не видаляються.
++## Практичні межі
 +
-+## Що ще потрібно завершити та перевірити
++Локальний індекс прискорює доступ до раніше відомих чатів. Він не гарантує миттєве отримання нового повідомлення без мережі та не завантажує наперед усі історії особистих чатів. Кеш історії веде TDLib. Замір часу відкриття/прокрутки на 400 чатах і перевірка інтерфейсу на Samsung A35 залишаються потрібними.
 +
-+- Повне компонування Nicegram: постійний округлений пошук, капсульна нижня навігація, заголовок переписки. Палітра не означає завершений дизайн.
-+- Середня вкладка нижньої навігації має відкривати власні налаштування swiryyyyX, як погоджено користувачем. Вона ще не реалізована.
-+- Власна іконка застосунку.
-+- Повна компіляція Android і перевірка зі справжнім TDLib: нові повідомлення, зміна папок, повторний вхід, декілька акаунтів, сповіщення при закритому застосунку, сторонні точки відкриття/пересилання.
-+- Замір часу запуску, пам’яті, прокручування й пропущених кадрів на 400 чатах. Підвищення швидкості ще не підтверджене замірами.
-+- Частковий кеш під час запуску може тимчасово давати неповну локальну проєкцію лічильників до надходження метаданих прихованих чатів; це потребує перевірки на телефоні.
++Перевірки: python3 tests/sviri/run_checks.py; python3 tests/sviri/check_slice.py. Перевіряють межу 200/201, канали, невідому кількість, збереження/ізоляцію акаунтів, hidden counters, повтори, порції та hide/unhide; синтаксис Java і XML. Це не заміна Android-компіляції.
 +
-+## Виконані перевірки
-+
-+```bash
-+python3 tests/sviri/run_checks.py
-+python3 tests/sviri/check_slice.py
-+```
-+
-+Пройшли: збереження/перезапуск, ізоляція акаунтів, помилки запису, одночасні операції для 400 чатів, масова атомарна операція, лічильники muted/marked/unknown та переповнення, затримки мережевих повторів. Справжній TdlibChatListSlice перевірено з імітаціями залежностей: порції, hide/unhide, порядок, об’єднання запитів, очищення підписок. Синтаксис змінених Java-файлів, XML і назви кольорів/властивостей теми також перевірено.
-+
-+Це не перевірка Android-типів і не компіляція APK. У поточному середовищі немає потрібних JDK 25, Android SDK/NDK та підготовлених native-підмодулів. Автоматичне завантаження Gradle не вдалося; окремо отриманий архів також не пройшов перевірку ZIP. Windows-сценарій тут не виконувався.
-+
-+## Застосування змін на комп’ютері
-+
-+База: https://github.com/TGX-Android/Telegram-X
-+Commit: b5f81630f070d1100673029682914ff3672769b0
-+
-+```bash
-+git clone https://github.com/TGX-Android/Telegram-X.git swiryyyyX
-+cd swiryyyyX
-+git checkout b5f81630f070d1100673029682914ff3672769b0
-+git apply --check /path/to/swiryyyyX.patch
-+git apply /path/to/swiryyyyX.patch
-+```
-+
-+На Windows підготувати JDK 25, Git/LFS, Android SDK та MSYS2 UCRT64 за README базового репозиторію. Скопіювати local.properties.swiryyyyX.example у local.properties, заповнити локальні шляхи та власні Telegram API credentials. Не використовувати чужі API credentials і не публікувати hash або ключ підпису.
-+
-+Після підготовки:
-+
-+```powershell
-+.\build-swiryyyyX.ps1
-+```
-+
-+Сценарій перевіряє обов’язкові поля й Java, отримує підмодулі та запускає assembleLatestUniversalDebug. Конфігурацію Firebase/google-services.json потрібно узгодити з власним package ID за README upstream; сценарій її не створює. Помилки справжньої Android-збірки потрібно усунути до встановлення APK.
-+
-+У ZIP є patch, копії змінених файлів і ця інструкція. Це не повний репозиторій і не інсталяційний файл. Застосовувати зміни саме до вказаного commit. Зберігати ліцензію GPL-3.0 та повідомлення оригінального проєкту.
++База: https://github.com/TGX-Android/Telegram-X, commit b5f81630f070d1100673029682914ff3672769b0. Збірка в приватному репозиторії swiryy/swiryyyyX через GitHub Actions; ключі беруться з Actions Secrets.
 diff --git a/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java b/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
 index e145906..e3d3a5e 100644
 --- a/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
@@ -346,8 +302,25 @@ index 0000000..40aa890
 +    return serverValue < 0 ? serverValue : (int) Math.max(0L, (long) serverValue - hidden[field]);
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/PriorityChatPolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/PriorityChatPolicy.java
+new file mode 100644
+index 0000000..275a580
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/PriorityChatPolicy.java
+@@ -0,0 +1,11 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++/** Metadata warm-up policy. Never requests message history or media. */
++public final class PriorityChatPolicy {
++  private PriorityChatPolicy () { }
++
++  public static boolean eager (boolean direct, boolean channel, int memberCount) {
++    return direct || (!channel && memberCount > 0 && memberCount <= 200);
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
-index 11c4bfb..270b91e 100644
+index 11c4bfb..9dd409d 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 @@ -494,6 +494,69 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
@@ -420,11 +393,90 @@ index 11c4bfb..270b91e 100644
    private int installedStickerSetLimit = 200;
  
    private int[] favoriteStickerIds;
-@@ -1470,6 +1533,15 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -1309,6 +1372,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     context().onAuthStateChanged(this, newAuthState, newStatus, myUserId);
+     listeners().updateAuthorizationState(newAuthState);
+     if (newStatus != Status.READY) {
++      priorityWarmupGeneration++;
+       startupPerformed = false;
+     }
+     setNeedTimeZoneListener(newStatus != Status.UNKNOWN);
+@@ -1467,9 +1531,86 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+     return startupPerformed;
+   }
+ 
++  private int priorityWarmupGeneration;
++
++  private void rememberPriorityChat (TdApi.Chat chat) {
++    if (chat == null) return;
++    boolean direct = false, channel = false;
++    int members = 0;
++    switch (chat.type.getConstructor()) {
++      case TdApi.ChatTypePrivate.CONSTRUCTOR:
++      case TdApi.ChatTypeSecret.CONSTRUCTOR:
++        direct = true;
++        break;
++      case TdApi.ChatTypeBasicGroup.CONSTRUCTOR: {
++        TdApi.BasicGroup group = cache().basicGroup(((TdApi.ChatTypeBasicGroup) chat.type).basicGroupId);
++        members = group != null ? group.memberCount : 0;
++        break;
++      }
++      case TdApi.ChatTypeSupergroup.CONSTRUCTOR: {
++        TdApi.ChatTypeSupergroup type = (TdApi.ChatTypeSupergroup) chat.type;
++        channel = type.isChannel;
++        TdApi.Supergroup group = cache().supergroup(type.supergroupId);
++        members = group != null ? group.memberCount : 0;
++        if (members == 0 && !channel) {
++          TdApi.SupergroupFullInfo full = cache().supergroupFull(type.supergroupId, false);
++          if (full != null) members = full.memberCount;
++        }
++        break;
++      }
++    }
++    settings().rememberPriorityChat(chat.id, PriorityChatPolicy.eager(direct, channel, members));
++  }
++
++  private void restorePriorityChats (long[] ids, int offset, int generation) {
++    if (generation != priorityWarmupGeneration || !isAuthorized() || offset >= ids.length) return;
++    int end = Math.min(offset + 16, ids.length);
++    java.util.concurrent.atomic.AtomicInteger remaining = new java.util.concurrent.atomic.AtomicInteger(end - offset);
++    for (int i = offset; i < end; i++) {
++      // GetChat reads TDLib's local chat database; it does not download histories.
++      send(new TdApi.GetChat(ids[i]), (chat, error) -> {
++        if (remaining.decrementAndGet() == 0) {
++          restorePriorityChats(ids, end, generation);
++        }
++      });
++    }
++  }
++
++  private void discoverPriorityChats (TdlibChatList list, int generation) {
++    if (generation != priorityWarmupGeneration || !isAuthorized() || list.isEndReached()) return;
++    int before = list.count(null);
++    list.loadMore(50, () -> {
++      if (generation != priorityWarmupGeneration || !isAuthorized() || list.isEndReached()) return;
++      // Yield between metadata pages; retry backoff still belongs to the source list.
++      double delay = list.count(null) > before ? .15 : 2.0;
++      runOnTdlibThread(() -> discoverPriorityChats(list, generation), delay, false);
++    });
++  }
++
    private void onPerformStartup () {
      Log.i("Performing account startup for accountId:%d, isAfterRestart:%b", accountId, startupPerformed);
      listeners().performStartup(startupPerformed);
 +    if (!startupPerformed) {
++      int generation = ++priorityWarmupGeneration;
++      long[] saved = settings().priorityChatIds();
++      long[] ordered = new long[saved.length];
++      int offset = 0;
++      for (long id : saved) if (ChatId.isUserChat(id)) ordered[offset++] = id;
++      for (long id : saved) if (!ChatId.isUserChat(id)) ordered[offset++] = id;
++      restorePriorityChats(ordered, 0, generation);
++      // First login must discover IDs through TDLib's ordered metadata lists.
++      runOnTdlibThread(() -> {
++        discoverPriorityChats(chatList(ChatPosition.CHAT_LIST_MAIN), generation);
++        discoverPriorityChats(chatList(ChatPosition.CHAT_LIST_ARCHIVE), generation);
++      }, .3, false);
 +      for (long chatId : settings().hiddenChatIds()) {
 +        if (chat(chatId) == null) {
 +          send(new TdApi.GetChat(chatId), (chat, error) -> {
@@ -436,15 +488,16 @@ index 11c4bfb..270b91e 100644
      startupPerformed = true;
    }
  
-@@ -7778,6 +7850,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7778,6 +7919,8 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          chatList.onUpdateNewChat(update.chat);
        }
      }
++    rememberPriorityChat(update.chat);
 +    refreshHiddenChatCounters(update.chat.id);
    }
  
    public void refreshChatState (long chatId) {
-@@ -7897,6 +7970,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7897,6 +8040,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        listChanges = setChatPositions(chat, update.positions);
      }
      listeners.updateChatLastMessage(update, listChanges);
@@ -452,7 +505,7 @@ index 11c4bfb..270b91e 100644
    }
  
    public static int CHAT_MARKED_AS_UNREAD = -1;
-@@ -8092,6 +8166,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8092,6 +8236,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      }
      if (chatListChange != null) {
        listeners.updateChatPosition(update, chatListChange);
@@ -460,7 +513,7 @@ index 11c4bfb..270b91e 100644
      }
    }
  
-@@ -8119,6 +8194,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8119,6 +8264,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chat.chatLists = list.toArray(new TdApi.ChatList[0]);
      }
      listeners.updateChatAddedToList(update);
@@ -468,7 +521,7 @@ index 11c4bfb..270b91e 100644
    }
  
    @TdlibThread
-@@ -8145,6 +8221,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8145,6 +8291,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chat.chatLists = ArrayUtils.removeElement(oldChatLists, foundIndex, new TdApi.ChatList[oldChatLists.length - 1]);
      }
      listeners.updateChatRemovedFromList(update);
@@ -476,7 +529,7 @@ index 11c4bfb..270b91e 100644
    }
  
    @TdlibThread
-@@ -8337,6 +8414,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8337,6 +8484,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chatLists = chatListsImpl(chat.positions);
      }
      listeners.updateChatReadInbox(update, availabilityChanged, chat, chatLists);
@@ -484,7 +537,7 @@ index 11c4bfb..270b91e 100644
    }
  
    @TdlibThread
-@@ -8477,6 +8555,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8477,6 +8625,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      }
  
      listeners.updateChatIsMarkedAsUnread(update);
@@ -492,7 +545,7 @@ index 11c4bfb..270b91e 100644
    }
  
    @TdlibThread
-@@ -8845,12 +8924,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8845,12 +8994,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
      listeners.updateNotificationSettings(update);
      notificationManager.onUpdateNotificationSettings(update, chatId, oldNotificationSettings);
@@ -507,7 +560,15 @@ index 11c4bfb..270b91e 100644
    }
  
    @TdlibThread
-@@ -9490,9 +9571,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8893,6 +9044,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       }
+     }
+     cache.onUpdateSupergroup(update, chat);
++    rememberPriorityChat(chat);
+   }
+ 
+   // Updates: SECURITY
+@@ -9490,9 +9642,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      counter.messageCount = unreadMessageCount;
      counter.messageUnmutedCount = unreadUnmutedCount;
  
@@ -520,7 +581,7 @@ index 11c4bfb..270b91e 100644
  
      return true;
    }
-@@ -9511,9 +9593,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9511,9 +9664,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      int oldTotalChatCount = counter.totalChatCount;
  
      if (counter.setChatCounters(totalCount, unreadChatCount, unreadUnmutedCount, markedAsUnreadCount, markedAsUnreadUnmutedCount)) {
@@ -533,7 +594,7 @@ index 11c4bfb..270b91e 100644
        return true;
      }
  
-@@ -9528,7 +9611,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9528,7 +9682,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @AnyThread
    public TdlibCounter getMainCounter () {
@@ -542,7 +603,7 @@ index 11c4bfb..270b91e 100644
    }
  
    @AnyThread
-@@ -9548,7 +9631,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9548,7 +9702,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @AnyThread
    public boolean hasUnreadChats (@NonNull TdApi.ChatList chatList) {
@@ -551,6 +612,22 @@ index 11c4bfb..270b91e 100644
    }
  
    @AnyThread
+@@ -10289,6 +10443,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       // Groups
+       case TdApi.UpdateBasicGroup.CONSTRUCTOR: {
+         cache.onUpdateBasicGroup((TdApi.UpdateBasicGroup) update);
++        rememberPriorityChat(chat(ChatId.fromBasicGroupId(((TdApi.UpdateBasicGroup) update).basicGroup.id)));
+         break;
+       }
+       case TdApi.UpdateBasicGroupFullInfo.CONSTRUCTOR: {
+@@ -10306,6 +10461,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       case TdApi.UpdateSupergroupFullInfo.CONSTRUCTOR: {
+         TdApi.UpdateSupergroupFullInfo updateSupergroupFullInfo = (TdApi.UpdateSupergroupFullInfo) update;
+         cache.onUpdateSupergroupFull(updateSupergroupFullInfo);
++        rememberPriorityChat(chat(ChatId.fromSupergroupId(updateSupergroupFullInfo.supergroupId)));
+         refreshChatState(ChatId.fromSupergroupId(updateSupergroupFullInfo.supergroupId));
+         break;
+       }
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
 index b2a472d..864eed4 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
@@ -967,10 +1044,10 @@ index b789b70..7d3aca9 100644
      String localKey = "tgx_ns_" + tdlib.id() + "_" + localChatId;
      IconCompat chatIcon = U.isValidBitmap(icon) ? IconCompat.createWithBitmap(icon) : null;
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-index ba92082..68841c2 100644
+index ba92082..488421c 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-@@ -131,6 +131,67 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -131,6 +131,87 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      tdlib.listeners().addCleanupListener(this);
    }
  
@@ -997,6 +1074,26 @@ index ba92082..68841c2 100644
 +      }
 +    }
 +    return store;
++  }
++
++  private static final String PRIORITY_CHATS_KEY = "sviri_priority_chats";
++  private HiddenChatStore priorityChats;
++
++  private synchronized HiddenChatStore priorityChats () {
++    if (priorityChats == null) {
++      final String storageKey = key(PRIORITY_CHATS_KEY, tdlib.id());
++      priorityChats = new HiddenChatStore(new HiddenChatStore.Storage() {
++        @Override public long[] read () { return Settings.instance().getLongArray(storageKey); }
++        @Override public void write (long[] ids) { Settings.instance().putLongArray(storageKey, ids); }
++      });
++    }
++    return priorityChats;
++  }
++
++  public long[] priorityChatIds () { return priorityChats().chatIds(); }
++
++  public void rememberPriorityChat (long chatId, boolean priority) {
++    priorityChats().setHidden(chatId, priority);
 +  }
 +
 +  public boolean isChatHidden (long chatId) {
@@ -1038,12 +1135,14 @@ index ba92082..68841c2 100644
    private void load () {
      // FIXME
    }
-@@ -158,6 +219,8 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -158,6 +239,10 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      editor.remove(key(THEME_CHAT_STYLE_KEY, accountId));
      editor.remove(key(PLAIN_CHANNEL_KEY, accountId));
      editor.remove(key(PREFERENCES_KEY, accountId));
 +    editor.remove(key(HIDDEN_CHATS_KEY, accountId));
 +    hiddenChats = null;
++    editor.remove(key(PRIORITY_CHATS_KEY, accountId));
++    priorityChats = null;
      editor.remove(key(THEME_GLOBAL_THEME_KEY, accountId));
      editor.remove(key(THEME_GLOBAL_THEME_NIGHT_KEY, accountId));
      editor.remove(key(THEME_GLOBAL_THEME_DAYLIGHT_KEY, accountId));
@@ -1264,10 +1363,162 @@ index aa708d3..614f3d1 100644
  
    @Override
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-index f81e95e..706321a 100644
+index f81e95e..772d64f 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-@@ -1824,7 +1824,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -22,6 +22,9 @@ import android.content.Intent;
+ import android.content.pm.PackageManager;
+ import android.content.res.ColorStateList;
+ import android.graphics.BitmapFactory;
++import android.graphics.Canvas;
++import android.graphics.Paint;
++import android.graphics.RectF;
+ import android.graphics.Color;
+ import android.graphics.Rect;
+ import android.graphics.drawable.Drawable;
+@@ -200,6 +203,10 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   }
+ 
+   private void updateBottomBarMargins () {
++    if (sviriNavigation != null) {
++      Views.setBottomMargin(sviriNavigation, Screen.dp(12) + extraBottomInsetWithoutIme);
++      checkPagerMargins();
++    }
+     if (bottomBar != null) {
+       int height = Math.round(extraBottomInsetWithoutIme * (1f - (updateSnackBar != null ? updateSnackBar.getVisibilityFactor() : 0)));
+       Views.setBottomMargin(bottomBar, height);
+@@ -207,6 +214,81 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+     }
+   }
+ 
++  private TextView sviriSearch;
++  private LinearLayout sviriNavigation;
++
++  private static final class SviriPill extends LinearLayout {
++    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final RectF bounds = new RectF();
++    SviriPill (Context context) {
++      super(context);
++      setWillNotDraw(false);
++    }
++    @Override protected void onDraw (Canvas canvas) {
++      paint.setColor(Theme.getColor(ColorId.headerLightBackground));
++      bounds.set(0, 0, getWidth(), getHeight());
++      canvas.drawRoundRect(bounds, Screen.dp(32), Screen.dp(32), paint);
++      super.onDraw(canvas);
++    }
++  }
++
++  private void createSviriNavigation (Context context) {
++    SviriPill searchPill = new SviriPill(context);
++    searchPill.setGravity(Gravity.CENTER_VERTICAL);
++    searchPill.setPadding(Screen.dp(18), 0, Screen.dp(18), 0);
++    sviriSearch = new AppCompatTextView(context);
++    sviriSearch.setText(Lang.getString(R.string.SviriSearchChats));
++    sviriSearch.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
++    sviriSearch.setGravity(Gravity.CENTER_VERTICAL);
++    sviriSearch.setCompoundDrawablesWithIntrinsicBounds(R.drawable.baseline_search_24, 0, 0, 0);
++    sviriSearch.setCompoundDrawablePadding(Screen.dp(12));
++    sviriSearch.setTextColor(Theme.getColor(ColorId.textPlaceholder));
++    TextViewCompat.setCompoundDrawableTintList(sviriSearch, ColorStateList.valueOf(Theme.getColor(ColorId.textPlaceholder)));
++    addThemeTextColorListener(sviriSearch, ColorId.textPlaceholder);
++    addThemeCompoundDrawableColorListener(sviriSearch, ColorId.textPlaceholder);
++    sviriSearch.setOnClickListener(v -> openSearchMode());
++    searchPill.addView(sviriSearch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
++    addThemeInvalidateListener(searchPill);
++    mainWrap.addView(searchPill, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(48), Gravity.TOP, Screen.dp(12), Screen.dp(8), Screen.dp(12), 0));
++    sviriSearchPill = searchPill;
++
++    sviriNavigation = new SviriPill(context);
++    sviriNavigation.setOrientation(LinearLayout.HORIZONTAL);
++    sviriNavigation.setPadding(Screen.dp(6), Screen.dp(6), Screen.dp(6), Screen.dp(6));
++    addThemeInvalidateListener(sviriNavigation);
++    addSviriTab(context, R.string.Chats, R.drawable.baseline_chat_bubble_24, true, () -> setCurrentPagerPosition(Math.max(0, indexOfChatList(ChatPosition.CHAT_LIST_MAIN)), true));
++    addSviriTab(context, R.string.Contacts, R.drawable.baseline_person_24, false, () -> {
++      ContactsController controller = new ContactsController(context, tdlib);
++      controller.initWithMode(ContactsController.MODE_NEW_CHAT);
++      navigateTo(controller);
++    });
++    addSviriTab(context, R.string.SviriTab, R.drawable.baseline_eye_off_24, false, () -> navigateTo(new SettingsHiddenChatsController(context, tdlib)));
++    addSviriTab(context, R.string.Settings, R.drawable.baseline_settings_24, false, () -> navigateTo(new SettingsController(context, tdlib)));
++    addSviriTab(context, R.string.SviriProfile, R.drawable.baseline_person_24, false, () -> tdlib.ui().openPrivateProfile(this, tdlib.myUserId(), null));
++    mainWrap.addView(sviriNavigation, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(64), Gravity.BOTTOM, Screen.dp(12), 0, Screen.dp(12), Screen.dp(12) + extraBottomInsetWithoutIme));
++    checkPagerMargins();
++  }
++
++  private View sviriSearchPill;
++
++  private void addSviriTab (Context context, int label, int icon, boolean active, Runnable action) {
++    TextView tab = new AppCompatTextView(context);
++    tab.setText(Lang.getString(label));
++    tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
++    tab.setGravity(Gravity.CENTER);
++    tab.setMaxLines(1);
++    tab.setEllipsize(TextUtils.TruncateAt.END);
++    tab.setCompoundDrawablesWithIntrinsicBounds(0, icon, 0, 0);
++    tab.setCompoundDrawablePadding(Screen.dp(3));
++    int color = active ? ColorId.textLink : ColorId.text;
++    tab.setTextColor(Theme.getColor(color));
++    TextViewCompat.setCompoundDrawableTintList(tab, ColorStateList.valueOf(Theme.getColor(color)));
++    addThemeTextColorListener(tab, color);
++    addThemeCompoundDrawableColorListener(tab, color);
++    tab.setOnClickListener(v -> action.run());
++    sviriNavigation.addView(tab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
++  }
++
+   @Override
+   protected void onCreateView (Context context, FrameLayoutFix contentView, ViewPager pager) {
+     if (BuildConfig.DEBUG) {
+@@ -221,6 +303,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+     mainWrap.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+     mainWrap.addView(pagerWrap);
+     generateChatSearchView(mainWrap);
++    createSviriNavigation(context);
+ 
+     contentView.addView(mainWrap);
+ 
+@@ -797,12 +880,18 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+   protected void onEnterSearchMode () {
+     super.onEnterSearchMode();
+     composeWrap.forceHide();
++    sviriSearchPill.setVisibility(View.GONE);
++    sviriNavigation.setVisibility(View.GONE);
++    checkPagerMargins();
+   }
+ 
+   @Override
+   protected void onLeaveSearchMode () {
+     super.onLeaveSearchMode();
+     composeWrap.showIfWasHidden();
++    sviriSearchPill.setVisibility(View.VISIBLE);
++    sviriNavigation.setVisibility(View.VISIBLE);
++    checkPagerMargins();
+   }
+ 
+   /*@Override
+@@ -1013,7 +1102,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+ 
+   private void checkComposeWrapPaddings () {
+     if (composeWrap != null) {
+-      int paddingBottom = (displayTabsAtBottom() ? getHeaderHeight() : 0) + extraBottomInsetWithoutIme;
++      int paddingBottom = (displayTabsAtBottom() ? getHeaderHeight() : 0) + extraBottomInsetWithoutIme + (sviriNavigation != null ? Screen.dp(80) : 0);
+       composeWrap.setPadding(composeWrap.getPaddingLeft(), composeWrap.getPaddingTop(), composeWrap.getPaddingRight(), paddingBottom);
+       composeWrap.setClipToPadding(paddingBottom == 0);
+     }
+@@ -1027,6 +1116,12 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+       Views.setBottomMargin(getViewPager(), 0);
+       Views.setBottomMargin(pagerWrap, 0);
+     }
++    if (sviriNavigation != null) {
++      boolean visible = sviriNavigation.getVisibility() == View.VISIBLE;
++      Views.setTopMargin(pagerWrap, visible ? Screen.dp(64) : 0);
++      int bottom = visible ? Screen.dp(80) + extraBottomInsetWithoutIme : 0;
++      Views.setBottomMargin(pagerWrap, bottom + (updateSnackBar != null ? Math.round(updateSnackBar.getHeight() * updateSnackBar.getVisibilityFactor()) : 0));
++    }
+   }
+ 
+   private void checkHeaderMargins () {
+@@ -1824,7 +1919,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
          .callback(unreadCounterCallback(MAIN_PAGER_ITEM_ID))
          .build();
        unreadCounterColorSet.setCounter(unreadCounter);
@@ -1276,7 +1527,7 @@ index f81e95e..706321a 100644
        defaultCounterListener = new CounterChangeListener() {
          @Override
          public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
-@@ -1847,7 +1847,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -1847,7 +1942,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
              });
            } else if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
              executeOnUiThreadOptional(() -> {
@@ -1285,7 +1536,7 @@ index f81e95e..706321a 100644
              });
            }
          }
-@@ -2991,7 +2991,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2991,7 +3086,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      int selectedFilter = getSelectedFilter(pagerItemId);
      Counter unreadCounter = buildUnreadCounter(pagerItemId, selectedFilter);
      if (unreadCounter != null) {
@@ -1294,7 +1545,7 @@ index f81e95e..706321a 100644
        updateCounter(chatList, unreadCounter, counter, /* animated */ false);
      }
      boolean showIcon = hasIcon(chatFolderStyle) || (pagerItemId == MAIN_PAGER_ITEM_ID && pagerItemPosition == 0);
-@@ -3042,6 +3042,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3042,6 +3137,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    public static void updateCounter (Tdlib tdlib, TdApi.ChatList chatList, Counter target, TdlibCounter counter, boolean animated) {
@@ -1302,7 +1553,7 @@ index f81e95e..706321a 100644
      int mutedCount, unmutedCount;
      int badgeFlags = tdlib.settings().getChatFolderBadgeFlags();
      boolean countMessages = BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_MESSAGES);
-@@ -3053,7 +3054,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3053,7 +3149,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        unmutedCount = Math.max(0, counter.chatUnmutedCount);
      }
      if (BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED) && chatList.getConstructor() == TdApi.ChatListMain.CONSTRUCTOR) {
@@ -1311,7 +1562,7 @@ index f81e95e..706321a 100644
        if (countMessages) {
          mutedCount += Math.max(0, archiveCounter.messageCount);
          unmutedCount += Math.max(0, archiveCounter.messageUnmutedCount);
-@@ -3202,7 +3203,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3202,7 +3298,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
          }
          dispatchCounter(chatList, counter);
          if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
@@ -1320,7 +1571,7 @@ index f81e95e..706321a 100644
          }
        });
      }
-@@ -3224,7 +3225,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3224,7 +3320,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        TdApi.ChatList chatList = pagerChatLists.get(i);
        ViewPagerTopView.Item section = pagerSections.get(i);
        if (section.counter != null) {
@@ -1507,12 +1758,15 @@ index 98ed3d2..4445115 100644
    <item type="id" name="app_container" />
  
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..558968c 100644
+index 416f9af..fc11827 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
-@@ -1,5 +1,12 @@
+@@ -1,5 +1,15 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources xmlns:tools="http://schemas.android.com/tools">
++  <string name="SviriSearchChats">Search chats</string>
++  <string name="SviriTab">swiryyyyX</string>
++  <string name="SviriProfile">Profile</string>
 +  <string name="SviriHideChat">Hide chat</string>
 +  <string name="SviriHiddenChatOpenHint">Цей чат прихований. Відкрий його в налаштуваннях, у розділі «Приховані чати».</string>
 +  <string name="SviriHiddenChats">Приховані чати</string>
@@ -1678,12 +1932,13 @@ index 0000000..2abf263
 +}
 diff --git a/tests/sviri/VisibilityCoreTest.java b/tests/sviri/VisibilityCoreTest.java
 new file mode 100644
-index 0000000..15c937e
+index 0000000..568aa9a
 --- /dev/null
 +++ b/tests/sviri/VisibilityCoreTest.java
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,48 @@
 +import org.thunderdog.challegram.telegram.HiddenCounterProjection;
 +import org.thunderdog.challegram.telegram.ChatLoadRetry;
++import org.thunderdog.challegram.telegram.PriorityChatPolicy;
 +
 +public class VisibilityCoreTest {
 +  static void check (boolean value, String message) {
@@ -1691,6 +1946,12 @@ index 0000000..15c937e
 +  }
 +
 +  public static void main (String[] args) {
++    check(PriorityChatPolicy.eager(true, false, 0), "direct chats are eager without member metadata");
++    check(PriorityChatPolicy.eager(false, false, 200), "200 member boundary is eager");
++    check(!PriorityChatPolicy.eager(false, false, 201), "large groups stay lazy");
++    check(!PriorityChatPolicy.eager(false, true, 12), "even small channels stay lazy");
++    check(!PriorityChatPolicy.eager(false, false, 0), "unknown count is not treated as a small group");
++    check(!PriorityChatPolicy.eager(false, false, -1), "invalid member count stays lazy");
 +    HiddenCounterProjection counters = new HiddenCounterProjection();
 +    // A muted unread group, an unread private chat with a marker, and a marker-only chat.
 +    counters.add(7, false, false);
@@ -1850,10 +2111,10 @@ index 0000000..7673641
 +    subprocess.run(['java', '-cp', tmp, 'org.thunderdog.challegram.telegram.SliceTest'], check=True)
 diff --git a/tests/sviri/run_checks.py b/tests/sviri/run_checks.py
 new file mode 100644
-index 0000000..6f1ab23
+index 0000000..f33765b
 --- /dev/null
 +++ b/tests/sviri/run_checks.py
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,48 @@
 +#!/usr/bin/env python3
 +"""Run standalone Java checks without downloading Gradle or Android SDK."""
 +from pathlib import Path
@@ -1869,12 +2130,13 @@ index 0000000..6f1ab23
 +                    str(package / 'telegram/HiddenChatStore.java'),
 +                    str(package / 'telegram/HiddenCounterProjection.java'),
 +                    str(package / 'telegram/ChatLoadRetry.java'),
++                    str(package / 'telegram/PriorityChatPolicy.java'),
 +                    str(tests / 'VisibilityCoreTest.java'),
 +                    str(tests / 'HiddenChatStoreTest.java'),
 +                    str(tests / 'ParseSources.java')], check=True)
 +    subprocess.run(['java', '-cp', tmp, 'HiddenChatStoreTest'], check=True)
 +    subprocess.run(['java', '-cp', tmp, 'VisibilityCoreTest'], check=True)
-+    modified = subprocess.check_output(['git', 'diff', '--name-only'], cwd=root, text=True).splitlines()
++    modified = subprocess.check_output(['git', 'diff', 'HEAD', '--name-only'], cwd=root, text=True).splitlines()
 +    untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=root, text=True).splitlines()
 +    sources = [str(root / path) for path in dict.fromkeys(modified + untracked)
 +               if path.startswith('app/src/main/java/') and path.endswith('.java')]
