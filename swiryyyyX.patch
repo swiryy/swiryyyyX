@@ -1,12 +1,12 @@
 diff --git a/SVIRI_STATUS.md b/SVIRI_STATUS.md
 new file mode 100644
-index 0000000..ac3a32f
+index 0000000..9e68d75
 --- /dev/null
 +++ b/SVIRI_STATUS.md
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,26 @@
 +# swiryyyyX — оновлення 2026-10-06
 +
-+Попередня ARM64-збірка GitHub Actions #5 успішно скомпільована. Нові зміни потребують окремої Android-збірки та перевірки на телефоні.
++ARM64-збірка GitHub Actions #10 успішно скомпільована; користувач підтвердив запуск і нормальну продуктивність. Поточні зміни потребують нової Android-збірки й перевірки на телефоні.
 +
 +## Нові зміни
 +
@@ -23,6 +23,27 @@ index 0000000..ac3a32f
 +Перевірки: python3 tests/sviri/run_checks.py; python3 tests/sviri/check_slice.py. Перевіряють межу 200/201, канали, невідому кількість, збереження/ізоляцію акаунтів, hidden counters, повтори, порції та hide/unhide; синтаксис Java і XML. Це не заміна Android-компіляції.
 +
 +База: https://github.com/TGX-Android/Telegram-X, commit b5f81630f070d1100673029682914ff3672769b0. Збірка в приватному репозиторії swiryy/swiryyyyX через GitHub Actions; ключі беруться з Actions Secrets.
++
++## Меню, Stars і колекційні подарунки
++
++- Довге натискання на рядок чату відкриває вибір і меню дій; прев’ю переписки більше не перехоплює жест. Для особистого чату додано Block/Unblock між Clear History та Hide.
++- Settings/Profile → Telegram Stars: баланс та історія через GetStarTransactions, сторінки по 50, повтор після помилки, ручне оновлення.
++- Settings/Profile → Collectible gifts: власні upgraded gifts через GetReceivedGifts, сторінки по 50, назва/номер, Model/Symbol/Backdrop і посилання t.me/nft.
++- Купівлю Stars, продаж/передачу/покращення подарунків і галерею з анімованими мініатюрами ще не реалізовано. Розділи завантажуються лише при відкритті.
+diff --git a/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java b/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java
+index f5bdb46..4611363 100644
+--- a/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java
++++ b/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java
+@@ -185,6 +185,9 @@ public class ChatView extends BaseView implements TdlibSettingsManager.Preferenc
+   private final BoolAnimator isSelected = new BoolAnimator(this, AnimatorUtils.DECELERATE_INTERPOLATOR, 180l);
+   private final RefreshRateLimiter refreshRateLimiter;
+ 
++  // Chat rows use selection actions on hold; preview remains available elsewhere.
++  @Override protected boolean allowForceTouch () { return false; }
++
+   public ChatView (Context context, Tdlib tdlib) {
+     super(context, tdlib);
+     if (titlePaint == null) {
 diff --git a/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java b/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
 index e145906..e3d3a5e 100644
 --- a/app/src/main/java/org/thunderdog/challegram/component/dialogs/SearchManager.java
@@ -1246,7 +1267,7 @@ index 9f7fc1a..2d41071 100644
        return unreadCounter;
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
-index 070ed21..2afcee0 100644
+index 070ed21..24aedd0 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 @@ -156,7 +156,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
@@ -1297,14 +1318,14 @@ index 070ed21..2afcee0 100644
          ids.append(R.id.more_btn_selectAll);
          strings.append(R.string.SelectMore);
          icons.append(R.drawable.baseline_playlist_add_check_24);
-@@ -1393,6 +1393,34 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1393,6 +1393,40 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
        strings.append(R.string.DeleteChatCache);
        icons.append(R.drawable.templarian_baseline_broom_24);
  
 +      if (selectedChats.size() == 1) {
-+        ids = new IntList(5);
-+        strings = new StringList(5);
-+        icons = new IntList(5);
++        ids = new IntList(6);
++        strings = new StringList(6);
++        icons = new IntList(6);
 +        int pinMode = canPinUnpinSelectedChats();
 +        if (shouldShowPin(pinMode)) {
 +          ids.append(R.id.menu_btn_pinUnpin);
@@ -1324,6 +1345,12 @@ index 070ed21..2afcee0 100644
 +          strings.append(R.string.ClearHistory);
 +          icons.append(R.drawable.templarian_baseline_broom_24);
 +        }
++        TdApi.Chat selected = selectedChats.valueAt(0);
++        if (!tdlib.isSelfChat(selected.id) && tdlib.chatUserId(selected) != 0) {
++          ids.append(canUnblock > 0 ? R.id.more_btn_unblock : R.id.more_btn_block);
++          strings.append(canUnblock > 0 ? R.string.Unblock : R.string.BlockContact);
++          icons.append(R.drawable.baseline_block_24);
++        }
 +      }
 +      ids.append(R.id.more_btn_hideChat);
 +      strings.append(R.string.SviriHideChat);
@@ -1332,7 +1359,7 @@ index 070ed21..2afcee0 100644
        getParentOrSelf().showMore(ids.get(), strings.get(), icons.get());
      } else if (id == R.id.menu_btn_pinUnpin) {
        int mode = canPinUnpinSelectedChats();
-@@ -1701,7 +1729,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1701,7 +1735,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onMoreItemPressed (int id) {
@@ -1346,7 +1373,7 @@ index 070ed21..2afcee0 100644
        long[] selectedChatIds = ArrayUtils.keys(selectedChats);
        tdlib.ui().showAddChatsToFolderOptions(this, selectedChatIds, this::onSelectionActionComplete);
        // break;
-@@ -1869,7 +1902,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1869,7 +1908,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
        strings.append(R.string.SelectAll);
        icons.append(R.drawable.baseline_playlist_add_check_24);
  
@@ -1355,7 +1382,7 @@ index 070ed21..2afcee0 100644
          ids.append(R.id.btn_selectUnread);
          strings.append(R.string.SelectUnread);
          icons.append(Config.ICON_MARK_AS_UNREAD);
-@@ -1881,11 +1914,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1881,11 +1920,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
        showOptions(Lang.getString(R.string.SelectMore), ids.get(), strings.get(), null, icons.get(), (v, optionId) -> {
          if (optionId == R.id.btn_selectAll) {
@@ -1370,7 +1397,7 @@ index 070ed21..2afcee0 100644
          }
          return true;
        });
-@@ -2046,7 +2079,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2046,7 +2085,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void requestLoadMore () {
@@ -1379,7 +1406,7 @@ index 070ed21..2afcee0 100644
    }
  
    // Search mode
-@@ -2079,7 +2112,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2079,7 +2118,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    protected boolean filterChatMessageSearchResult (TdApi.Chat chat) {
@@ -1388,7 +1415,19 @@ index 070ed21..2afcee0 100644
    }
  
    @Override
-@@ -3002,6 +3035,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2247,7 +2286,10 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+             tdlib.ui().showArchiveOptions(this, tdlib.chatList(ChatPosition.CHAT_LIST_ARCHIVE));
+           }
+         } else {
+-          tdlib.ui().showChatOptions(this, chatList(), chat.getChatId(), null, new TdApi.MessageSourceChatList(), canSelectChat(chat), isChatSelected(chat), () -> selectUnselectChat(chat, true));
++          if (canSelectChat(chat)) {
++            if (!isChatSelected(chat)) selectUnselectChat(chat, true);
++            onMenuItemPressed(R.id.menu_btn_more, v);
++          }
+         }
+         return true;
+       }
+@@ -3002,6 +3044,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
@@ -2011,22 +2050,28 @@ index f81e95e..9b47d2a 100644
        }
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
-index 30a74d2..4d77b03 100644
+index 30a74d2..82fcb35 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
-@@ -637,6 +637,8 @@ public class SettingsController extends ViewController<Void> implements
+@@ -637,6 +637,12 @@ public class SettingsController extends ViewController<Void> implements
      items.add(new ListItem(ListItem.TYPE_SEPARATOR));
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_chatSettings, R.drawable.baseline_data_usage_24, R.string.DataSettings));
      items.add(new ListItem(ListItem.TYPE_SEPARATOR));
++    items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_sviriStars, R.drawable.baseline_star_24, R.string.SviriStars));
++    items.add(new ListItem(ListItem.TYPE_SEPARATOR));
++    items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_sviriGifts, R.drawable.dotvhs_baseline_gift_24, R.string.SviriCollectibleGifts));
++    items.add(new ListItem(ListItem.TYPE_SEPARATOR));
 +    items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_hiddenChats, R.drawable.baseline_eye_off_24, R.string.SviriHiddenChats));
 +    items.add(new ListItem(ListItem.TYPE_SEPARATOR));
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_privacySettings, R.drawable.baseline_lock_24, R.string.PrivacySettings));
      items.add(new ListItem(ListItem.TYPE_SEPARATOR));
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_stickerSettingsAndEmoji, R.drawable.deproko_baseline_stickers_filled_24, R.string.StickersAndEmoji));
-@@ -1229,6 +1231,8 @@ public class SettingsController extends ViewController<Void> implements
+@@ -1229,6 +1235,10 @@ public class SettingsController extends ViewController<Void> implements
        navigateTo(c);
      } else if (viewId == R.id.btn_chatSettings) {
        navigateTo(new SettingsDataController(context, tdlib));
++    } else if (viewId == R.id.btn_sviriStars || viewId == R.id.btn_sviriGifts) {
++      navigateTo(new SettingsStarsController(context, tdlib, viewId == R.id.btn_sviriGifts));
 +    } else if (viewId == R.id.btn_hiddenChats) {
 +      navigateTo(new SettingsHiddenChatsController(context, tdlib));
      } else if (viewId == R.id.btn_privacySettings) {
@@ -2128,6 +2173,145 @@ index 0000000..887f511
 +    super.destroy();
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SettingsStarsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SettingsStarsController.java
+new file mode 100644
+index 0000000..34423ba
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SettingsStarsController.java
+@@ -0,0 +1,117 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.content.Context;
++import android.view.View;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.v.CustomRecyclerView;
++import java.math.BigDecimal;
++import java.text.DateFormat;
++import java.util.ArrayList;
++import java.util.Date;
++import java.util.HashSet;
++
++/** Account-owned Stars and collectibles; loads only when this screen is opened. */
++public final class SettingsStarsController extends RecyclerViewController<Void> implements View.OnClickListener {
++  private final boolean gifts;
++  private SettingsAdapter adapter;
++  private final ArrayList<ListItem> entries = new ArrayList<>();
++  private final HashSet<String> seen = new HashSet<>();
++  private String offset = "", error;
++  private boolean loading, loaded;
++  private TdApi.StarAmount balance;
++
++  public SettingsStarsController (Context context, Tdlib tdlib, boolean gifts) {
++    super(context, tdlib);
++    this.gifts = gifts;
++  }
++  @Override public int getId () { return gifts ? R.id.controller_sviriGifts : R.id.controller_sviriStars; }
++  @Override public CharSequence getName () { return Lang.getString(gifts ? R.string.SviriCollectibleGifts : R.string.SviriStars); }
++  @Override protected void onCreateView (Context context, CustomRecyclerView recyclerView) {
++    adapter = new SettingsAdapter(this);
++    recyclerView.setAdapter(adapter);
++    load();
++  }
++  private static String amount (TdApi.StarAmount value) {
++    return BigDecimal.valueOf(value.starCount).add(BigDecimal.valueOf(value.nanostarCount, 9)).stripTrailingZeros().toPlainString();
++  }
++  private void load () {
++    if (loading || isDestroyed() || (loaded && offset.isEmpty() && error == null)) return;
++    loading = true;
++    error = null;
++    rebuild();
++    TdApi.MessageSender owner = new TdApi.MessageSenderUser(tdlib.myUserId());
++    if (gifts) {
++      TdApi.GetReceivedGifts request = new TdApi.GetReceivedGifts();
++      request.businessConnectionId = "";
++      request.ownerId = owner;
++      request.excludeUnlimited = true;
++      request.excludeUpgradable = true;
++      request.excludeNonUpgradable = true;
++      request.offset = offset;
++      request.limit = 50;
++      tdlib.client().send(request, result -> runOnUiThreadOptional(() -> receive(result)));
++    } else {
++      tdlib.client().send(new TdApi.GetStarTransactions(owner, "", null, offset, 50), result -> runOnUiThreadOptional(() -> receive(result)));
++    }
++  }
++  private void receive (TdApi.Object result) {
++    if (isDestroyed()) return;
++    loading = false;
++    if (result instanceof TdApi.Error) {
++      error = TD.toErrorString(result);
++    } else if (result instanceof TdApi.StarTransactions) {
++      TdApi.StarTransactions page = (TdApi.StarTransactions) result;
++      balance = page.starAmount;
++      for (TdApi.StarTransaction transaction : page.transactions) {
++        if (!seen.add(transaction.id)) continue;
++        String date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(transaction.date * 1000L));
++        String type = transaction.type.getClass().getSimpleName().replace("StarTransactionType", "").replaceAll("([a-z])([A-Z])", "$1 $2");
++        entries.add(new ListItem(ListItem.TYPE_DESCRIPTION, 0, 0, amount(transaction.starAmount) + " ★ · " + date + "\n" + type + (transaction.isRefund ? " · " + Lang.getString(R.string.SviriRefund) : "")));
++      }
++      offset = page.nextOffset;
++      loaded = true;
++    } else if (result instanceof TdApi.ReceivedGifts) {
++      TdApi.ReceivedGifts page = (TdApi.ReceivedGifts) result;
++      for (TdApi.ReceivedGift received : page.gifts) {
++        if (!(received.gift instanceof TdApi.SentGiftUpgraded) || !seen.add(received.receivedGiftId)) continue;
++        TdApi.UpgradedGift gift = ((TdApi.SentGiftUpgraded) received.gift).gift;
++        entries.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_sviriGift, R.drawable.dotvhs_baseline_gift_24, gift.title + " #" + gift.number).setData(gift));
++      }
++      offset = page.nextOffset;
++      loaded = true;
++    } else {
++      error = Lang.getString(R.string.SviriUnexpectedResponse);
++    }
++    rebuild();
++  }
++  private void rebuild () {
++    if (adapter == null || isDestroyed()) return;
++    ArrayList<ListItem> items = new ArrayList<>();
++    if (!gifts && balance != null) items.add(new ListItem(ListItem.TYPE_DESCRIPTION, 0, 0, Lang.getString(R.string.SviriStarsBalance) + ": " + amount(balance) + " ★"));
++    items.addAll(entries);
++    if (error != null) items.add(new ListItem(ListItem.TYPE_DESCRIPTION, 0, 0, error));
++    if (loading) items.add(new ListItem(ListItem.TYPE_DESCRIPTION, 0, 0, R.string.LoadingInformation));
++    else if (error != null || !offset.isEmpty()) items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_sviriLoadMore, 0, error != null ? R.string.SviriRetry : R.string.SviriLoadMore));
++    else if (loaded && entries.isEmpty()) items.add(new ListItem(ListItem.TYPE_EMPTY, 0, 0, gifts ? R.string.SviriNoCollectibles : R.string.SviriNoStarTransactions));
++    if (!loading) items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_sviriRefresh, 0, R.string.SviriRefresh));
++    adapter.setItems(items, false);
++  }
++  @Override public void onClick (View view) {
++    if (view.getId() == R.id.btn_sviriLoadMore) load();
++    else if (view.getId() == R.id.btn_sviriRefresh && !loading) {
++      entries.clear(); seen.clear(); offset = ""; loaded = false; error = null; load();
++    } else if (view.getId() == R.id.btn_sviriGift && view.getTag() instanceof ListItem) {
++      TdApi.UpgradedGift gift = (TdApi.UpgradedGift) ((ListItem) view.getTag()).getData();
++      String details = gift.title + " #" + gift.number + "\n" + Lang.getString(R.string.SviriGiftModel) + ": " + gift.model.name + "\n" + Lang.getString(R.string.SviriGiftSymbol) + ": " + gift.symbol.name + "\n" + Lang.getString(R.string.SviriGiftBackdrop) + ": " + gift.backdrop.name;
++      showOptions(details, new int[] {R.id.btn_sviriOpenGift, R.id.btn_cancel}, new String[] {Lang.getString(R.string.SviriOpenGift), Lang.getString(R.string.Cancel)}, null, new int[] {R.drawable.dotvhs_baseline_gift_24, R.drawable.baseline_cancel_24}, (itemView, id) -> {
++        if (id == R.id.btn_sviriOpenGift) tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null);
++        return true;
++      });
++    }
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java b/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java
+index fea87b1..7c6a7cd 100644
+--- a/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java
++++ b/app/src/main/java/org/thunderdog/challegram/widget/BaseView.java
+@@ -497,8 +497,10 @@ public class BaseView extends SparseDrawableView implements ClickHelper.Delegate
+   private static final int FORCE_TOUCH_CHAT = 1;
+   private static final int FORCE_TOUCH_CUSTOM = 2;
+ 
++  protected boolean allowForceTouch () { return true; }
++
+   private int needForceTouch (final float x, final float y) {
+-    if (!Config.FORCE_TOUCH_ENABLED) {
++    if (!Config.FORCE_TOUCH_ENABLED || !allowForceTouch()) {
+       return FORCE_TOUCH_NONE;
+     }
+     if (tdlib != null && chatId != 0 && Settings.instance().needPreviewChatOnHold()) {
 diff --git a/app/src/main/other/themes/colors-and-properties.xml b/app/src/main/other/themes/colors-and-properties.xml
 index 795c154..9cd6609 100644
 --- a/app/src/main/other/themes/colors-and-properties.xml
@@ -2172,7 +2356,7 @@ index 0000000..a013a63
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
 +circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
 diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
-index 98ed3d2..4445115 100644
+index 98ed3d2..db0a51e 100644
 --- a/app/src/main/res/values/ids.xml
 +++ b/app/src/main/res/values/ids.xml
 @@ -1,5 +1,11 @@
@@ -2187,8 +2371,22 @@ index 98ed3d2..4445115 100644
    <item type="id" name="app_root" />
    <item type="id" name="app_container" />
  
+@@ -1433,4 +1439,12 @@
+   <item type="id" name="btn_playback_speed_1_2" />
+   <item type="id" name="btn_playback_speed_1_5" />
+   <item type="id" name="btn_playback_speed_2_0" />
++  <item type="id" name="controller_sviriGifts" />
++  <item type="id" name="controller_sviriStars" />
++  <item type="id" name="btn_sviriGift" />
++  <item type="id" name="btn_sviriLoadMore" />
++  <item type="id" name="btn_sviriRefresh" />
++  <item type="id" name="btn_sviriOpenGift" />
++  <item type="id" name="btn_sviriStars" />
++  <item type="id" name="btn_sviriGifts" />
+ </resources>
+\ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..fc11827 100644
+index 416f9af..bb25f4e 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -2207,6 +2405,25 @@ index 416f9af..fc11827 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
+@@ -5909,4 +5919,18 @@
+   <string name="RestrictedContent">Restricted Content</string>
+   <string name="SensitiveContent">Sensitive Content</string>
+ 
++  <string name="SviriStars">Telegram Stars</string>
++  <string name="SviriCollectibleGifts">Collectible gifts</string>
++  <string name="SviriStarsBalance">Balance</string>
++  <string name="SviriRefund">Refund</string>
++  <string name="SviriUnexpectedResponse">Unable to load this response. Try again.</string>
++  <string name="SviriRetry">Try again</string>
++  <string name="SviriLoadMore">Load more</string>
++  <string name="SviriRefresh">Refresh</string>
++  <string name="SviriNoCollectibles">No collectible gifts yet</string>
++  <string name="SviriNoStarTransactions">No Stars transactions yet</string>
++  <string name="SviriGiftModel">Model</string>
++  <string name="SviriGiftSymbol">Symbol</string>
++  <string name="SviriGiftBackdrop">Backdrop</string>
++  <string name="SviriOpenGift">Open collectible</string>
+ </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
 index 0000000..7c7e1c4
