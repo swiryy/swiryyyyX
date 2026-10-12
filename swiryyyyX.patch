@@ -2586,7 +2586,7 @@ index 0000000..0097add
 +  @Override public void destroy () { generation++; tdlib.removeStarAmountListener(balanceListener); super.destroy(); }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
-index 606de78..f172bdb 100644
+index 606de78..ac679db 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 @@ -78,6 +78,7 @@ import org.thunderdog.challegram.navigation.ViewController;
@@ -2680,20 +2680,23 @@ index 606de78..f172bdb 100644
      if (selectedChats.size() == 0) {
        headerCell.setSubtitle(Lang.lowercase(Lang.getString(R.string.SelectChats)));
      } else if (selectedChats.size() == 1) {
-@@ -2466,6 +2482,12 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2466,7 +2482,14 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void displayChatList (CharSequence title, TdApi.ChatList chatList) {
+-    if (isDisplayingChatList(chatList))
++    boolean wasFolderReview = folderForwardReview;
 +    folderForwardReview = false;
 +    if (folderForwardLoading) {
 +      folderForwardGeneration++;
 +      if (folderForwardLoader != null) folderForwardLoader.cancel();
 +      finishFolderLoading();
 +    }
-     if (isDisplayingChatList(chatList))
++    if (isDisplayingChatList(chatList) && !wasFolderReview)
        return;
      headerCell.setTitle(StringUtils.isEmptyOrBlank(title) ? getName() : title);
-@@ -2495,7 +2517,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+     displayingChatList = chatList;
+@@ -2495,7 +2518,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        displayingChats.addAll(chats);
      }
  
@@ -2702,7 +2705,7 @@ index 606de78..f172bdb 100644
        if (isEmptyItem(adapter.getItem(0))) {
          adapter.getItems().remove(0);
          adapter.notifyItemRemoved(0);
-@@ -2969,7 +2991,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2969,7 +2992,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    private void checkAbilityToSend () {
      final int selectedCount = selectedChats.size();
@@ -2711,7 +2714,7 @@ index 606de78..f172bdb 100644
  
      if (canShareLink) {
        sendButton.setIsReady(isReady, true);
-@@ -3361,7 +3383,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3361,7 +3384,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void sendMessages (boolean forceGoToChat, boolean isSingleTap, @Nullable TdApi.MessageSendOptions finalSendOptions, boolean reloadProperties) {
@@ -2720,7 +2723,7 @@ index 606de78..f172bdb 100644
        return;
      }
  
-@@ -3373,6 +3395,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3373,6 +3396,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
      // Double check if there are any new restrictions
      for (int i = 0; i < selectedChats.size(); i++) {
        long chatId = selectedChats.valueAt(i).getChatId();
@@ -2731,7 +2734,7 @@ index 606de78..f172bdb 100644
        if (showErrorMessage(null, chatId, true)) {
          return;
        }
-@@ -3660,6 +3686,162 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3660,6 +3687,162 @@ public class ShareController extends TelegramViewController<ShareController.Args
      }
    }
  
@@ -2869,7 +2872,7 @@ index 606de78..f172bdb 100644
 +      for (long id : ids) {
 +        TdApi.Chat chat = tdlib.chat(id);
 +        if (chat != null && !unavailable.contains(id) && !tdlib.settings().isChatHidden(id) && accept(chat) && getErrorMessage(id) == null) {
-+          recipients.add(new TGFoundChat(tdlib, list, chat, false, null));
++          recipients.add(newChat(list, chat));
 +        }
 +      }
 +      selectedChats.clear();
@@ -2894,7 +2897,7 @@ index 606de78..f172bdb 100644
    private @Nullable PopupLayout folderSelectorLayout;
  
    private static class FolderMenuWrap extends MenuMoreWrap {
-@@ -3720,6 +3902,8 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3720,6 +3903,8 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    @Override
    public void destroy () {
