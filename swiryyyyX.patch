@@ -359,6 +359,59 @@ index 0000000..7d6a11e
 +    retryAt = 0;
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardLoader.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardLoader.java
+new file mode 100644
+index 0000000..ad99632
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardLoader.java
+@@ -0,0 +1,47 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import java.util.LinkedHashSet;
++import java.util.function.Consumer;
++
++/** One on-demand metadata snapshot; never sends messages or loads chat history. All callbacks run on the UI thread. */
++public final class FolderForwardLoader {
++  public static final int SNAPSHOT_LIMIT = 10000;
++  public interface Transport {
++    // 0: more loaded, 404: end reached, otherwise an error.
++    void loadMore (Consumer<Integer> callback);
++    void snapshot (Consumer<long[]> callback);
++  }
++  public interface Listener {
++    void complete (long[] ids);
++    void failed ();
++  }
++  private final Transport transport;
++  private final Listener listener;
++  private boolean active;
++  private int generation, pages;
++  public FolderForwardLoader (Transport transport, Listener listener) { this.transport = transport; this.listener = listener; }
++  public void start () { if (active) return; active = true; pages = 0; generation++; more(generation); }
++  public void cancel () { active = false; generation++; }
++  public void timeout () { if (active) fail(); }
++  private boolean current (int token) { return active && token == generation; }
++  private void fail () { cancel(); listener.failed(); }
++  private void more (int token) {
++    if (!current(token)) return;
++    if (++pages > 200) { fail(); return; }
++    transport.loadMore(code -> {
++      if (!current(token)) return;
++      if (code == 0) more(token);
++      else if (code == 404) transport.snapshot(ids -> {
++        if (!current(token)) return;
++        if (ids == null || ids.length >= SNAPSHOT_LIMIT) { fail(); return; }
++        LinkedHashSet<Long> unique = new LinkedHashSet<>();
++        for (long id : ids) if (id != 0) unique.add(id);
++        long[] snapshot = new long[unique.size()]; int i = 0;
++        for (long id : unique) snapshot[i++] = id;
++        cancel(); listener.complete(snapshot);
++      });
++      else fail();
++    });
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java b/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java
 new file mode 100644
 index 0000000..3145a1b
@@ -2532,6 +2585,324 @@ index 0000000..0097add
 +  }
 +  @Override public void destroy () { generation++; tdlib.removeStarAmountListener(balanceListener); super.destroy(); }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
+index 606de78..f172bdb 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
+@@ -78,6 +78,7 @@ import org.thunderdog.challegram.navigation.ViewController;
+ import org.thunderdog.challegram.support.RippleSupport;
+ import org.thunderdog.challegram.support.ViewSupport;
+ import org.thunderdog.challegram.telegram.ChatListListener;
++import org.thunderdog.challegram.telegram.FolderForwardLoader;
+ import org.thunderdog.challegram.telegram.RightId;
+ import org.thunderdog.challegram.telegram.TGLegacyManager;
+ import org.thunderdog.challegram.telegram.Tdlib;
+@@ -392,7 +393,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+   }
+ 
+   private int getMenuItemCount () {
+-    int count = 1;
++    int count = canForwardSavedToFolder() ? 2 : 1;
+     if (canExportContent()) {
+       count++;
+     }
+@@ -402,6 +403,11 @@ public class ShareController extends TelegramViewController<ShareController.Args
+   @Override
+   public void fillMenuItems (int id, HeaderView header, LinearLayout menu) {
+     if (id == R.id.menu_search) {
++      if (canForwardSavedToFolder()) {
++        HeaderButton folder = header.addButton(menu, R.id.menu_btn_sviriForwardFolder, getHeaderIconColorId(), this, R.drawable.baseline_folder_24, Screen.dp(49f), R.drawable.bg_btn_header);
++        folder.setContentDescription(Lang.getString(R.string.SviriForwardFolder));
++        folder.setOnLongClickListener(v -> { if (!folderForwardLoading) showForwardFolderSelector(); return true; });
++      }
+       if (canCopyLink()) {
+         header.addButton(menu, R.id.menu_btn_copy, getHeaderIconColorId(), this, R.drawable.baseline_link_24, Screen.dp(49f), R.drawable.bg_btn_header);
+       }
+@@ -437,7 +443,13 @@ public class ShareController extends TelegramViewController<ShareController.Args
+ 
+   @Override
+   public void onMenuItemPressed (int id, View view) {
+-    if (id == R.id.menu_btn_search) {
++    if (id == R.id.menu_btn_sviriForwardFolder) {
++      if (!folderForwardLoading && !isSent) {
++        int folderId = Settings.instance().getInt("sviri_forward_folder_" + tdlib.id(), 0);
++        TdApi.ChatFolderInfo info = tdlib.chatFolderInfo(folderId);
++        if (info != null) selectForwardFolder(info); else showForwardFolderSelector();
++      }
++    } else if (id == R.id.menu_btn_search) {
+       if (getDisplayingChats() != null) {
+         openSearchMode();
+       }
+@@ -1519,7 +1531,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+       if (displayingChats != null) {
+         TGFoundChat parsedChat = newChat(chatList.chatList(), chat);
+         displayingChats.add(atIndex, parsedChat);
+-        if (isDisplayingChatList(chatList.chatList())) {
++        if (isDisplayingChatList(chatList.chatList()) && !folderForwardReview) {
+           if (isEmptyItem(adapter.getItem(0))) {
+             adapter.removeItem(0);
+           }
+@@ -1536,7 +1548,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+       List<TGFoundChat> displayingChats = getChatsByChatList(chatList.chatList());
+       if (displayingChats != null) {
+         displayingChats.remove(fromIndex);
+-        if (isDisplayingChatList(chatList.chatList())) {
++        if (isDisplayingChatList(chatList.chatList()) && !folderForwardReview) {
+           adapter.removeItem(fromIndex);
+           recyclerView.invalidateItemDecorations();
+         }
+@@ -1551,7 +1563,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+       if (displayingChats != null) {
+         TGFoundChat entry = displayingChats.remove(fromIndex);
+         displayingChats.add(toIndex, entry);
+-        if (isDisplayingChatList(chatList.chatList())) {
++        if (isDisplayingChatList(chatList.chatList()) && !folderForwardReview) {
+           LinearLayoutManager manager = (LinearLayoutManager) recyclerView.getLayoutManager();
+           int savedPosition, savedOffset;
+           if (manager != null) {
+@@ -1968,7 +1980,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+ 
+   private boolean toggleCheckedImpl (View view, TGFoundChat chat, @Nullable RunnableBool after, boolean performAsyncChecks) {
+     long chatId = chat.getAnyId();
+-    if (lockedChatIds.has(chatId)) {
++    if (folderForwardLoading || lockedChatIds.has(chatId)) {
+       return false;
+     }
+ 
+@@ -2019,6 +2031,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+   }
+ 
+   private void updateHeader () {
++    if (folderForwardLoading) {
++      headerCell.setSubtitle(Lang.getString(R.string.SviriFolderLoading));
++      return;
++    }
+     if (selectedChats.size() == 0) {
+       headerCell.setSubtitle(Lang.lowercase(Lang.getString(R.string.SelectChats)));
+     } else if (selectedChats.size() == 1) {
+@@ -2466,6 +2482,12 @@ public class ShareController extends TelegramViewController<ShareController.Args
+   }
+ 
+   private void displayChatList (CharSequence title, TdApi.ChatList chatList) {
++    folderForwardReview = false;
++    if (folderForwardLoading) {
++      folderForwardGeneration++;
++      if (folderForwardLoader != null) folderForwardLoader.cancel();
++      finishFolderLoading();
++    }
+     if (isDisplayingChatList(chatList))
+       return;
+     headerCell.setTitle(StringUtils.isEmptyOrBlank(title) ? getName() : title);
+@@ -2495,7 +2517,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+       displayingChats.addAll(chats);
+     }
+ 
+-    if (isDisplayingChatList(chatList)) {
++    if (isDisplayingChatList(chatList) && !folderForwardReview) {
+       if (isEmptyItem(adapter.getItem(0))) {
+         adapter.getItems().remove(0);
+         adapter.notifyItemRemoved(0);
+@@ -2969,7 +2991,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+ 
+   private void checkAbilityToSend () {
+     final int selectedCount = selectedChats.size();
+-    final boolean isReady = selectedCount > 0;
++    final boolean isReady = selectedCount > 0 && !folderForwardLoading;
+ 
+     if (canShareLink) {
+       sendButton.setIsReady(isReady, true);
+@@ -3361,7 +3383,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+   }
+ 
+   private void sendMessages (boolean forceGoToChat, boolean isSingleTap, @Nullable TdApi.MessageSendOptions finalSendOptions, boolean reloadProperties) {
+-    if (selectedChats.size() == 0 || isSent) {
++    if (selectedChats.size() == 0 || isSent || folderForwardLoading) {
+       return;
+     }
+ 
+@@ -3373,6 +3395,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+     // Double check if there are any new restrictions
+     for (int i = 0; i < selectedChats.size(); i++) {
+       long chatId = selectedChats.valueAt(i).getChatId();
++      if (folderForwardReview && tdlib.settings().isChatHidden(chatId)) {
++        UI.showToast(Lang.getString(R.string.SviriFolderRecipientChanged), Toast.LENGTH_LONG);
++        return;
++      }
+       if (showErrorMessage(null, chatId, true)) {
+         return;
+       }
+@@ -3660,6 +3686,162 @@ public class ShareController extends TelegramViewController<ShareController.Args
+     }
+   }
+ 
++  private boolean folderForwardLoading;
++  private boolean folderForwardReview;
++  private int folderForwardGeneration;
++  private FolderForwardLoader folderForwardLoader;
++
++  private boolean canForwardSavedToFolder () {
++    if (mode != MODE_MESSAGES || tdlib.chatFolderCount() == 0) return false;
++    Args args = getArguments();
++    if (args == null || args.messages == null || args.messages.length == 0) return false;
++    for (TdApi.Message message : args.messages) if (!tdlib.isSelfChat(message.chatId)) return false;
++    return true;
++  }
++
++  private void showForwardFolderSelector () {
++    if (!canForwardSavedToFolder() || folderForwardLoading || isSent) return;
++    FolderMenuWrap menu = new FolderMenuWrap(context);
++    menu.init(getThemeListeners(), null);
++    for (TdApi.ChatFolderInfo info : tdlib.chatFolders()) {
++      View item = menu.addItem(View.NO_ID, TD.toCharSequence(info.name), TD.findFolderIcon(info.icon, R.drawable.baseline_folder_24), null, view -> {
++        PopupLayout.parentOf(view).hideWindow(true);
++        selectForwardFolder((TdApi.ChatFolderInfo) view.getTag());
++      });
++      item.setTag(info);
++    }
++    menu.setAnchorMode(MenuMoreWrap.ANCHOR_MODE_HEADER);
++    menu.setTranslationY(headerView.getTranslationY());
++    folderSelectorLayout = new PopupLayout(context);
++    folderSelectorLayout.init(!Settings.instance().useEdgeToEdge());
++    folderSelectorLayout.setNeedRootInsets(); folderSelectorLayout.setOverlayStatusBar(true);
++    folderSelectorLayout.setDismissListener(popup -> folderSelectorLayout = null);
++    folderSelectorLayout.showMoreView(menu);
++  }
++
++  private void finishFolderLoading () {
++    folderForwardLoading = false;
++    if (headerView != null) headerView.updateCustomButton(getMenuId(), R.id.menu_btn_sviriForwardFolder, view -> {
++      if (view instanceof HeaderButton) ((HeaderButton) view).setShowProgress(false, 0f);
++    });
++    updateHeader(); checkAbilityToSend();
++  }
++
++  private boolean currentFolderForward (int token) {
++    return !isDestroyed() && !isSent && folderForwardLoading && folderForwardGeneration == token;
++  }
++
++  private void selectForwardFolder (TdApi.ChatFolderInfo info) {
++    if (!canForwardSavedToFolder() || folderForwardLoading || isSent) return;
++    folderForwardLoading = true;
++    final int token = ++folderForwardGeneration;
++    final TdApi.ChatListFolder list = new TdApi.ChatListFolder(info.id);
++    updateHeader(); checkAbilityToSend();
++    if (headerView != null) headerView.updateCustomButton(getMenuId(), R.id.menu_btn_sviriForwardFolder, view -> {
++      if (view instanceof HeaderButton) ((HeaderButton) view).setShowProgress(true, 0f);
++    });
++    folderForwardLoader = new FolderForwardLoader(new FolderForwardLoader.Transport() {
++      @Override public void loadMore (java.util.function.Consumer<Integer> callback) {
++        tdlib.client().send(new TdApi.LoadChats(list, 100), result -> runOnUiThreadOptional(() -> {
++          callback.accept(result instanceof TdApi.Ok ? 0 : result instanceof TdApi.Error ? ((TdApi.Error) result).code : -1);
++        }));
++      }
++      @Override public void snapshot (java.util.function.Consumer<long[]> callback) {
++        tdlib.client().send(new TdApi.GetChats(list, FolderForwardLoader.SNAPSHOT_LIMIT), result -> runOnUiThreadOptional(() -> {
++          callback.accept(result instanceof TdApi.Chats ? ((TdApi.Chats) result).chatIds : null);
++        }));
++      }
++    }, new FolderForwardLoader.Listener() {
++      @Override public void complete (long[] ids) {
++        if (currentFolderForward(token)) reloadMessageProperties(ignored -> {
++          if (!currentFolderForward(token)) return;
++          if (messageProperties == null || messageProperties.length != getArgumentsStrict().messages.length) {
++            folderForwardGeneration++; finishFolderLoading();
++            UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG); return;
++          }
++          for (TdApi.MessageProperties properties : messageProperties) if (properties == null) {
++            folderForwardGeneration++; finishFolderLoading();
++            UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG); return;
++          }
++          new FolderRecipients(info, list, ids, token).prepare();
++        });
++      }
++      @Override public void failed () {
++        if (!currentFolderForward(token)) return;
++        folderForwardGeneration++; finishFolderLoading();
++        UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG);
++      }
++    });
++    folderForwardLoader.start();
++    UI.post(() -> {
++      if (!currentFolderForward(token)) return;
++      folderForwardLoader.cancel(); folderForwardGeneration++; finishFolderLoading();
++      UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG);
++    }, 60000L);
++  }
++
++  /** Load only permission metadata, at most four requests at a time. Keep snapshot order. */
++  private final class FolderRecipients {
++    final TdApi.ChatFolderInfo info;
++    final TdApi.ChatListFolder list;
++    final long[] ids;
++    final int token;
++    final java.util.HashSet<Long> unavailable = new java.util.HashSet<>();
++    int next, pending;
++    boolean pumping;
++    FolderRecipients (TdApi.ChatFolderInfo info, TdApi.ChatListFolder list, long[] ids, int token) {
++      this.info = info; this.list = list; this.ids = ids; this.token = token;
++    }
++    void prepare () {
++      if (!currentFolderForward(token) || pumping) return;
++      pumping = true;
++      while (pending < 4 && next < ids.length && currentFolderForward(token)) {
++        long id = ids[next++]; TdApi.Chat chat = tdlib.chat(id);
++        if (chat == null || tdlib.settings().isChatHidden(id) || !accept(chat)) { unavailable.add(id); continue; }
++        if (ChatId.isSupergroup(id)) {
++          pending++;
++          tdlib.cache().supergroupFull(ChatId.toSupergroupId(id), value -> runOnUiThreadOptional(() -> ready(id, value != null)));
++        } else if (ChatId.isUserChat(id) && hasVoiceOrVideoMessageContent()) {
++          pending++;
++          tdlib.cache().userFull(tdlib.chatUserId(id), value -> runOnUiThreadOptional(() -> ready(id, value != null)));
++        }
++      }
++      pumping = false;
++      if (next == ids.length && pending == 0 && currentFolderForward(token)) apply();
++    }
++    void ready (long id, boolean available) {
++      if (!currentFolderForward(token)) return;
++      if (!available) unavailable.add(id);
++      pending--; prepare();
++    }
++    void apply () {
++      // Build recipients once, then show their checked rows; no message is sent here.
++      ArrayList<TGFoundChat> recipients = new ArrayList<>();
++      for (long id : ids) {
++        TdApi.Chat chat = tdlib.chat(id);
++        if (chat != null && !unavailable.contains(id) && !tdlib.settings().isChatHidden(id) && accept(chat) && getErrorMessage(id) == null) {
++          recipients.add(new TGFoundChat(tdlib, list, chat, false, null));
++        }
++      }
++      selectedChats.clear();
++      while (selectedChatIds.size() > 0) selectedChatIds.remove(selectedChatIds.get(selectedChatIds.size() - 1));
++      for (TGFoundChat chat : recipients) {
++        selectedChats.put(chat.getChatId(), chat); selectedChatIds.append(chat.getChatId());
++      }
++      hasSelectedAnything = true;
++      finishFolderLoading();
++      displayChatList(TD.toCharSequence(info.name), list);
++      folderForwardReview = true;
++      // Snapshot rows include recipients outside the initially loaded screen.
++      if (!recipients.isEmpty()) {
++        ArrayList<ListItem> cells = new ArrayList<>(); addCells(recipients, cells); adapter.setItems(cells, false);
++      } else adapter.setItems(Collections.singletonList(emptyItem()), false);
++      Settings.instance().putInt("sviri_forward_folder_" + tdlib.id(), info.id);
++      finishFolderLoading();
++      UI.showToast(Lang.getString(R.string.SviriFolderSelected, recipients.size(), ids.length - recipients.size()), Toast.LENGTH_LONG);
++    }
++  }
++
+   private @Nullable PopupLayout folderSelectorLayout;
+ 
+   private static class FolderMenuWrap extends MenuMoreWrap {
+@@ -3720,6 +3902,8 @@ public class ShareController extends TelegramViewController<ShareController.Args
+ 
+   @Override
+   public void destroy () {
++    folderForwardGeneration++;
++    if (folderForwardLoader != null) folderForwardLoader.cancel();
+     super.destroy();
+     for (TdlibChatListSlice list : listByChatList.values()) {
+       list.performDestroy();
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
 index 0000000..72da59a
@@ -2900,7 +3271,7 @@ index 0000000..a013a63
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
 +circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
 diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
-index 98ed3d2..db0a51e 100644
+index 98ed3d2..501db2a 100644
 --- a/app/src/main/res/values/ids.xml
 +++ b/app/src/main/res/values/ids.xml
 @@ -1,5 +1,11 @@
@@ -2915,7 +3286,7 @@ index 98ed3d2..db0a51e 100644
    <item type="id" name="app_root" />
    <item type="id" name="app_container" />
  
-@@ -1433,4 +1439,12 @@
+@@ -1433,4 +1439,13 @@
    <item type="id" name="btn_playback_speed_1_2" />
    <item type="id" name="btn_playback_speed_1_5" />
    <item type="id" name="btn_playback_speed_2_0" />
@@ -2927,10 +3298,11 @@ index 98ed3d2..db0a51e 100644
 +  <item type="id" name="btn_sviriOpenGift" />
 +  <item type="id" name="btn_sviriStars" />
 +  <item type="id" name="btn_sviriGifts" />
++  <item type="id" name="menu_btn_sviriForwardFolder" />
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..d754576 100644
+index 416f9af..7c2288d 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -2949,7 +3321,7 @@ index 416f9af..d754576 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,40 @@
+@@ -5909,4 +5919,45 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -2989,6 +3361,11 @@ index 416f9af..d754576 100644
 +  <string name="SviriGiftUpgraded">Upgraded</string>
 +  <string name="SviriStarsGift">Telegram Stars gift</string>
 +  <string name="SviriStarsPrize">Telegram Stars prize</string>
++  <string name="SviriForwardFolder">Forward to folder (hold to change folder)</string>
++  <string name="SviriFolderLoading">Loading folder recipients…</string>
++  <string name="SviriFolderLoadFailed">Could not load the complete folder. Try again.</string>
++  <string name="SviriFolderSelected">Selected: %1$d chats. Skipped: %2$d. Review recipients, then tap Send.</string>
++  <string name="SviriFolderRecipientChanged">A selected chat is now hidden. Choose the folder again before sending.</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
@@ -3035,6 +3412,47 @@ index 0000000..9de2c4a
 +telegram.api_id=
 +telegram.api_hash=
 +tgx.extension=none
+diff --git a/tests/sviri/FolderForwardLoaderTest.java b/tests/sviri/FolderForwardLoaderTest.java
+new file mode 100644
+index 0000000..e3b393a
+--- /dev/null
++++ b/tests/sviri/FolderForwardLoaderTest.java
+@@ -0,0 +1,35 @@
++import java.util.*;
++import java.util.function.Consumer;
++import org.thunderdog.challegram.telegram.FolderForwardLoader;
++public class FolderForwardLoaderTest {
++  static class Transport implements FolderForwardLoader.Transport {
++    ArrayDeque<Consumer<Integer>> loads=new ArrayDeque<>();
++    Consumer<long[]> snapshot;
++    int calls;
++    public void loadMore(Consumer<Integer> cb){calls++;loads.add(cb);}
++    public void snapshot(Consumer<long[]> cb){snapshot=cb;}
++    void reply(int code){loads.remove().accept(code);}
++  }
++  static class Result implements FolderForwardLoader.Listener {
++    long[] ids;int errors,completions;
++    public void complete(long[] value){ids=value;completions++;}
++    public void failed(){errors++;}
++  }
++  static void check(boolean value){if(!value)throw new AssertionError();}
++  public static void main(String[] args){
++    Transport t=new Transport();Result r=new Result();FolderForwardLoader l=new FolderForwardLoader(t,r);
++    l.start();l.start();check(t.calls==1);
++    for(int i=0;i<4;i++)t.reply(0);
++    check(r.completions==0&&t.snapshot==null);t.reply(404);check(t.snapshot!=null);
++    long[] ids=new long[402];for(int i=0;i<400;i++)ids[i]=i+1;ids[400]=1;ids[401]=0;
++    t.snapshot.accept(ids);check(r.ids.length==400&&r.ids[0]==1&&r.ids[399]==400&&r.completions==1);
++    l.start();t.reply(429);check(r.errors==1&&r.completions==1);
++    l.start();Consumer<Integer> old=t.loads.remove();l.cancel();old.accept(404);check(r.completions==1);
++    l.start();l.timeout();check(r.errors==2);t.reply(0);check(r.errors==2);
++    l.start();t.reply(404);t.snapshot.accept(new long[10000]);check(r.errors==3);
++    l.start();t.reply(404);t.snapshot.accept(null);check(r.errors==4);
++    l.start();t.reply(404);t.snapshot.accept(new long[0]);check(r.ids.length==0&&r.completions==2);
++    l.start();for(int i=0;i<200;i++)t.reply(0);check(r.errors==5);
++    System.out.println("PASS: 400 folder recipients, deduplication, repeated taps, errors, cancellation, timeout, snapshot limits and empty folders");
++  }
++}
 diff --git a/tests/sviri/HiddenChatStoreTest.java b/tests/sviri/HiddenChatStoreTest.java
 new file mode 100644
 index 0000000..168442f
@@ -3456,10 +3874,10 @@ index 0000000..131900f
 +    subprocess.run(['java', '-cp', str(tmp), 'ThemeLoaderTest'], check=True)
 diff --git a/tests/sviri/run_checks.py b/tests/sviri/run_checks.py
 new file mode 100644
-index 0000000..f33765b
+index 0000000..e5e5445
 --- /dev/null
 +++ b/tests/sviri/run_checks.py
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,51 @@
 +#!/usr/bin/env python3
 +"""Run standalone Java checks without downloading Gradle or Android SDK."""
 +from pathlib import Path
@@ -3476,11 +3894,14 @@ index 0000000..f33765b
 +                    str(package / 'telegram/HiddenCounterProjection.java'),
 +                    str(package / 'telegram/ChatLoadRetry.java'),
 +                    str(package / 'telegram/PriorityChatPolicy.java'),
++                    str(package / 'telegram/FolderForwardLoader.java'),
++                    str(tests / 'FolderForwardLoaderTest.java'),
 +                    str(tests / 'VisibilityCoreTest.java'),
 +                    str(tests / 'HiddenChatStoreTest.java'),
 +                    str(tests / 'ParseSources.java')], check=True)
 +    subprocess.run(['java', '-cp', tmp, 'HiddenChatStoreTest'], check=True)
 +    subprocess.run(['java', '-cp', tmp, 'VisibilityCoreTest'], check=True)
++    subprocess.run(['java', '-cp', tmp, 'FolderForwardLoaderTest'], check=True)
 +    modified = subprocess.check_output(['git', 'diff', 'HEAD', '--name-only'], cwd=root, text=True).splitlines()
 +    untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=root, text=True).splitlines()
 +    sources = [str(root / path) for path in dict.fromkeys(modified + untracked)
