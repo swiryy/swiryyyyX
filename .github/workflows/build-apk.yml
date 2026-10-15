@@ -84,7 +84,7 @@ jobs:
         working-directory: source
         run: |
           chmod +x gradlew
-          ./gradlew assembleLatestArm64Debug --console=plain --no-daemon --max-workers=2 --info --stacktrace -Dorg.gradle.internal.http.connectionTimeout=30000 -Dorg.gradle.internal.http.socketTimeout=60000 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8' '-Dkotlin.daemon.jvm.options=-Xmx2g' &
+          ./gradlew assembleLatestArm64Debug --console=plain --no-daemon --no-parallel --no-configuration-cache -Dorg.gradle.isolated-projects=false -Dorg.gradle.unsafe.isolated-projects=false --max-workers=2 --info --stacktrace -Dorg.gradle.internal.http.connectionTimeout=30000 -Dorg.gradle.internal.http.socketTimeout=60000 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8' '-Dkotlin.daemon.jvm.options=-Xmx2g' &
           build_pid=$!
           (
             ticks=0
