@@ -359,6 +359,44 @@ index 0000000..7d6a11e
 +    retryAt = 0;
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java
+new file mode 100644
+index 0000000..a25ea14
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import java.util.LinkedHashMap;
++import java.util.Map;
++
++/** Local, persistent folder ranks. Does not change Telegram pin state. */
++public final class FolderChatOrder {
++  public interface Storage { long[] read(); void write(long[] ids); }
++  private final Storage storage;
++  private final Map<Long, Long> ranks = new LinkedHashMap<>();
++  public FolderChatOrder(Storage storage) {
++    this.storage = storage;
++    long[] ids = storage.read();
++    if (ids != null) for (long id : ids) if (id != 0 && !ranks.containsKey(id)) ranks.put(id, (long) ranks.size());
++  }
++  public synchronized void remember(long[] ids) {
++    boolean changed = false;
++    for (long id : ids) if (id != 0 && !ranks.containsKey(id)) {
++      ranks.put(id, (long) ranks.size()); changed = true;
++    }
++    if (changed) {
++      long[] ordered = new long[ranks.size()]; int i = 0;
++      for (long id : ranks.keySet()) ordered[i++] = id;
++      storage.write(ordered);
++    }
++  }
++  public synchronized long rank(long id) {
++    if (!ranks.containsKey(id)) remember(new long[]{id});
++    return ranks.get(id);
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardLoader.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardLoader.java
 new file mode 100644
 index 0000000..ad99632
@@ -1327,10 +1365,38 @@ index 45bf7fd..6d43b89 100644
        if (!onLoadMore.isEmpty()) {
          List<Runnable> callbacks = new ArrayList<>(onLoadMore);
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
-index 7226964..3017bc6 100644
+index 7226964..f0c27d4 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
-@@ -77,7 +77,7 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -49,10 +49,17 @@ public final class TdlibChatListSlice implements Destroyable {
+   private RunnableData<List<Entry>> subCallback;
+   private int maxSize;
+   private int displayCount;
++  private final int folderId;
++  private boolean fixedOrder;
++  private final TdlibSettingsManager.FolderOrderListener folderOrderListener = this::onFolderOrderChanged;
++  private void onFolderOrderChanged(int id) {
++    if (id == folderId && !isDestroyed() && listener != null) refreshFolderOrder();
++  }
+ 
+   public static class Entry extends TdlibChatList.Entry {
+     private long broughtToTopTime;
+     private boolean keepPosition;
++    private long folderRank = -1;
+ 
+     public Entry (TdApi.Chat chat, TdApi.ChatList chatList, TdApi.ChatPosition position, boolean keepPosition) {
+       super(chat, chatList, position);
+@@ -66,6 +73,9 @@ public final class TdlibChatListSlice implements Destroyable {
+ 
+     @Override
+     public int compareTo (TdlibChatList.Entry other) {
++      if (folderRank >= 0 && other instanceof Entry && ((Entry) other).folderRank >= 0) {
++        return Long.compare(folderRank, ((Entry) other).folderRank);
++      }
+       long otherTime = other instanceof Entry ? ((Entry) other).broughtToTopTime : 0;
+       if (this.broughtToTopTime != otherTime) {
+         return Long.compare(otherTime, this.broughtToTopTime);
+@@ -77,10 +87,35 @@ public final class TdlibChatListSlice implements Destroyable {
    TdlibChatListSlice (Tdlib tdlib, TdlibChatList chatList, Filter<TdApi.Chat> filter, boolean keepPositions, @Nullable Modifier modifier) {
      this.tdlib = tdlib;
      this.sourceList = chatList;
@@ -1339,7 +1405,52 @@ index 7226964..3017bc6 100644
      this.keepPositions = keepPositions;
      this.haveCustomModifications = keepPositions;
      this.modifier = modifier;
-@@ -261,6 +261,16 @@ public final class TdlibChatListSlice implements Destroyable {
++    this.folderId = chatList.chatList() instanceof TdApi.ChatListFolder ? ((TdApi.ChatListFolder) chatList.chatList()).chatFolderId : 0;
++    this.fixedOrder = folderId > 0 && tdlib.settings().isFolderOrderFixed(folderId);
++  }
++
++  private Entry makeEntry(TdApi.Chat chat, TdApi.ChatList list, TdApi.ChatPosition position) {
++    Entry entry = new Entry(chat, list, position, keepPositions);
++    if (fixedOrder) entry.folderRank = tdlib.settings().folderChatOrder(folderId).rank(chat.id);
++    return entry;
++  }
++
++  @TdlibThread
++  private void refreshFolderOrder() {
++    tdlib.ensureTdlibThread();
++    fixedOrder = tdlib.settings().isFolderOrderFixed(folderId);
++    for (Entry entry : filteredList) {
++      entry.folderRank = fixedOrder ? tdlib.settings().folderChatOrder(folderId).rank(entry.chat.id) : -1;
++    }
++    // Explicit mode changes rebuild only the displayed slice; message updates do not.
++    for (int i = displayCount - 1; i >= 0; i--) {
++      Entry entry = filteredList.get(i);
++      subListener.onChatRemoved(sourceList, entry.chat, i, new Tdlib.ChatChange(entry.effectivePosition, Tdlib.ChatChange.ALL));
++    }
++    displayCount = 0;
++    Collections.sort(filteredList);
++    dispatchChats(ChatListListener.ChangeFlags.ITEM_REMOVED);
+   }
+ 
+   private int loadedCount () {
+@@ -144,6 +179,7 @@ public final class TdlibChatListSlice implements Destroyable {
+     if (this.listener != null)
+       throw new IllegalStateException();
+ 
++    fixedOrder = folderId > 0 && tdlib.settings().isFolderOrderFixed(folderId);
+     this.subListener = subListener;
+     this.listener = new ChatListListener() {
+       @Override
+@@ -165,7 +201,7 @@ public final class TdlibChatListSlice implements Destroyable {
+           if (!filter.accept(chat))
+             return;
+         }
+-        Entry entry = new Entry(chat, chatList.chatList(), changeInfo.position, keepPositions);
++        Entry entry = makeEntry(chat, chatList.chatList(), changeInfo.position);
+         final int insertIndex;
+         try {
+           if (needSort()) {
+@@ -261,11 +297,21 @@ public final class TdlibChatListSlice implements Destroyable {
        public void onChatListItemChanged (TdlibChatList chatList, TdApi.Chat chat, int changeType) {
          ensureTdlibThreadAndList(chatList);
          final int existingIndex = indexOfChat(chat.id);
@@ -1356,7 +1467,13 @@ index 7226964..3017bc6 100644
          if (existingIndex == -1) {
            if (filter != null && filter.accept(chat)) { // chat became unfiltered
              TdApi.ChatPosition position = ChatPosition.findPosition(chat, chatList.chatList());
-@@ -273,9 +283,13 @@ public final class TdlibChatListSlice implements Destroyable {
+             if (position != null && position.order != 0) {
+-              final Entry entry = new Entry(chat, chatList.chatList(), position, keepPositions);
++              final Entry entry = makeEntry(chat, chatList.chatList(), position);
+               int atIndex = findInsertIndex(entry);
+               if (atIndex == filteredList.size()) {
+                 filteredList.add(entry);
+@@ -273,9 +319,13 @@ public final class TdlibChatListSlice implements Destroyable {
                  return;
                }
                filteredList.add(atIndex, entry);
@@ -1373,27 +1490,53 @@ index 7226964..3017bc6 100644
              }
            }
            return; // do nothing, as chat is not from this list
-@@ -291,6 +305,7 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -291,18 +341,31 @@ public final class TdlibChatListSlice implements Destroyable {
      this.subCallback = subCallback;
      final RunnableData<List<TdlibChatList.Entry>> callback = (moreChats) -> {
        tdlib.ensureTdlibThread();
 +      if (isDestroyed()) return;
        synchronized (filteredList) {
++        if (fixedOrder) {
++          long[] ids = new long[moreChats.size()];
++          for (int i = 0; i < ids.length; i++) ids[i] = moreChats.get(i).chat.id;
++          tdlib.settings().folderChatOrder(folderId).remember(ids);
++        }
          List<Entry> addedEntries = new ArrayList<>(moreChats.size());
          for (TdlibChatList.Entry entry : moreChats) {
-@@ -311,8 +326,10 @@ public final class TdlibChatListSlice implements Destroyable {
+           if ((filter == null || filter.accept(entry.chat)) && (!haveCustomModifications || indexOfChat(entry.chat.id) == -1)) {
+-            addedEntries.add(new Entry(entry.chat, entry.chatList, entry.effectivePosition, keepPositions));
++            addedEntries.add(makeEntry(entry.chat, entry.chatList, entry.effectivePosition));
+           }
+         }
+         if (addedEntries.isEmpty()) {
+           return;
+         }
++        if (fixedOrder && !loadingInitialChunk) {
++          for (Entry entry : addedEntries) {
++            if (indexOfChat(entry.chat.id) == -1) listener.onChatAdded(sourceList, entry.chat, 0, new Tdlib.ChatChange(entry.effectivePosition, Tdlib.ChatChange.ALL));
++          }
++          return;
++        }
+         boolean haveCustomModifications = modifier != null && modifier.modifySlice(this, addedEntries, filteredList.size());
+         filteredList.addAll(addedEntries);
++        if (fixedOrder) Collections.sort(filteredList);
+         if (haveCustomModifications) {
+           this.haveCustomModifications = true;
+         }
+@@ -311,8 +374,11 @@ public final class TdlibChatListSlice implements Destroyable {
      };
  
      loadingInitialChunk = true;
 -    sourceList.initializeList(filter, listener, callback, this.maxSize = initialChunkSize, () -> {
 +    tdlib.settings().addHiddenChatsListener(hiddenChatsListener);
++    tdlib.settings().addFolderOrderListener(folderOrderListener);
 +    sourceList.initializeList(this.filter, listener, callback, this.maxSize = initialChunkSize, () -> {
        loadingInitialChunk = false;
 +      if (isDestroyed()) { sourceList.unsubscribeFromUpdates(listener); return; }
        dispatchChats(0);
        if (!isDestroyed() && onLoadInitialChunk != null) {
          onLoadInitialChunk.run();
-@@ -320,6 +337,16 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -320,6 +386,16 @@ public final class TdlibChatListSlice implements Destroyable {
      });
    }
  
@@ -1410,7 +1553,7 @@ index 7226964..3017bc6 100644
    private boolean loadingInitialChunk;
  
    private boolean isSuspended () {
-@@ -349,33 +376,48 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -349,33 +425,49 @@ public final class TdlibChatListSlice implements Destroyable {
      return notifyCount;
    }
  
@@ -1464,6 +1607,7 @@ index 7226964..3017bc6 100644
        isDestroyed = true;
 -      sourceList.unsubscribeFromUpdates(this.listener);
 +      tdlib.settings().removeHiddenChatsListener(hiddenChatsListener);
++      tdlib.settings().removeFolderOrderListener(folderOrderListener);
 +      tdlib.runOnTdlibThread(() -> {
 +        sourceList.unsubscribeFromUpdates(this.listener);
 +        loadMoreCallbacks.clear();
@@ -1471,7 +1615,7 @@ index 7226964..3017bc6 100644
      }
    }
  
-@@ -393,6 +435,10 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -393,6 +485,10 @@ public final class TdlibChatListSlice implements Destroyable {
        if (isDestroyed()) {
          return;
        }
@@ -1482,6 +1626,15 @@ index 7226964..3017bc6 100644
        final int fromIndex = indexOfChat(chatId);
        if (fromIndex != -1) {
          /*if (fromIndex == 0) // No need to do anything
+@@ -418,7 +514,7 @@ public final class TdlibChatListSlice implements Destroyable {
+           return;
+         haveCustomModifications = true;
+         // Force add item to top
+-        Entry entry = new Entry(chat, sourceList.chatList(), ChatPosition.findPosition(chat, sourceList.chatList()), keepPositions);
++        Entry entry = makeEntry(chat, sourceList.chatList(), ChatPosition.findPosition(chat, sourceList.chatList()));
+         entry.bringToTop();
+         final int atIndex = findInsertIndex(entry);
+         filteredList.add(atIndex, entry);
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java
 index 5ee89c6..f203e36 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibCounter.java
@@ -1619,10 +1772,10 @@ index b789b70..7d3aca9 100644
      String localKey = "tgx_ns_" + tdlib.id() + "_" + localChatId;
      IconCompat chatIcon = U.isValidBitmap(icon) ? IconCompat.createWithBitmap(icon) : null;
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-index ba92082..357e11b 100644
+index ba92082..671afdc 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-@@ -127,10 +127,97 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -127,10 +127,133 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      this.tdlib = tdlib;
  
      load();
@@ -1660,6 +1813,42 @@ index ba92082..357e11b 100644
 +    }
 +    return store;
 +  }
++
++  private static final String FOLDER_ORDER_PREFIX = "sviri_folder_order_";
++  private final java.util.HashMap<Integer, FolderChatOrder> folderOrders = new java.util.HashMap<>();
++  private final java.util.concurrent.CopyOnWriteArrayList<FolderOrderListener> folderOrderListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
++  public interface FolderOrderListener { void onFolderOrderChanged(int folderId); }
++  public boolean isFolderOrderFixed(int folderId) {
++    return folderId > 0 && Settings.instance().getBoolean(key(FOLDER_ORDER_PREFIX, tdlib.id()) + folderId + "_enabled", false);
++  }
++  public synchronized FolderChatOrder folderChatOrder(int folderId) {
++    FolderChatOrder order = folderOrders.get(folderId);
++    if (order == null) {
++      final String storageKey = key(FOLDER_ORDER_PREFIX, tdlib.id()) + folderId + "_ids";
++      order = new FolderChatOrder(new FolderChatOrder.Storage() {
++        @Override public long[] read() { return Settings.instance().getLongArray(storageKey); }
++        @Override public void write(long[] ids) { Settings.instance().putLongArray(storageKey, ids); }
++      });
++      folderOrders.put(folderId, order);
++    }
++    return order;
++  }
++  public void setFolderOrderFixed(int folderId, boolean fixed) {
++    if (folderId <= 0) return;
++    tdlib.runOnTdlibThread(() -> {
++      if (isFolderOrderFixed(folderId) == fixed) return;
++      if (fixed) {
++        java.util.List<TdlibChatList.Entry> entries = tdlib.chatList(new TdApi.ChatListFolder(folderId)).listCopy(null);
++        long[] ids = new long[entries.size()];
++        for (int i = 0; i < ids.length; i++) ids[i] = entries.get(i).chat.id;
++        folderChatOrder(folderId).remember(ids);
++      }
++      Settings.instance().putBoolean(key(FOLDER_ORDER_PREFIX, tdlib.id()) + folderId + "_enabled", fixed);
++      for (FolderOrderListener listener : folderOrderListeners) listener.onFolderOrderChanged(folderId);
++    });
++  }
++  public void addFolderOrderListener(FolderOrderListener listener) { folderOrderListeners.addIfAbsent(listener); }
++  public void removeFolderOrderListener(FolderOrderListener listener) { folderOrderListeners.remove(listener); }
 +
 +  private static final String PRIORITY_CHATS_KEY = "sviri_priority_chats";
 +  private HiddenChatStore priorityChats;
@@ -1720,17 +1909,38 @@ index ba92082..357e11b 100644
    private void load () {
      // FIXME
    }
-@@ -158,6 +245,10 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -158,6 +281,11 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      editor.remove(key(THEME_CHAT_STYLE_KEY, accountId));
      editor.remove(key(PLAIN_CHANNEL_KEY, accountId));
      editor.remove(key(PREFERENCES_KEY, accountId));
 +    editor.remove(key(HIDDEN_CHATS_KEY, accountId));
 +    hiddenChats = null;
++    synchronized (this) { folderOrders.clear(); }
 +    editor.remove(key(PRIORITY_CHATS_KEY, accountId));
 +    priorityChats = null;
      editor.remove(key(THEME_GLOBAL_THEME_KEY, accountId));
      editor.remove(key(THEME_GLOBAL_THEME_NIGHT_KEY, accountId));
      editor.remove(key(THEME_GLOBAL_THEME_DAYLIGHT_KEY, accountId));
+@@ -187,7 +315,8 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+       notificationDataPrefix,
+       conversionPrefix,
+       localChatIdPrefix,
+-      remoteChatIdPrefix
++      remoteChatIdPrefix,
++      key(FOLDER_ORDER_PREFIX, accountId)
+     }, editor);
+     editor.apply();
+ 
+@@ -1186,6 +1315,9 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+ 
+   public void forgetChatFolder (int chatFolderId) {
+     setChatFolderEnabled(chatFolderId, true); // Reset to default
++    Settings.instance().remove(key(FOLDER_ORDER_PREFIX, tdlib.id()) + chatFolderId + "_enabled");
++    Settings.instance().remove(key(FOLDER_ORDER_PREFIX, tdlib.id()) + chatFolderId + "_ids");
++    synchronized (this) { folderOrders.remove(chatFolderId); }
+   }
+ 
+   public void setChatFolderEnabled (int chatFolderId, boolean isEnabled) {
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java
 index 3f0cccf..c9a225e 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibUi.java
@@ -1799,7 +2009,7 @@ index 9f7fc1a..2d41071 100644
        return unreadCounter;
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
-index 070ed21..f275551 100644
+index 070ed21..ab0fa11 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 @@ -156,7 +156,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
@@ -1811,6 +2021,15 @@ index 070ed21..f275551 100644
    }
  
    public @Nullable ChatFilter getFilter () {
+@@ -510,7 +510,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+       public int getMovementFlags (@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
+         if (viewHolder.getItemViewType() == ChatsAdapter.VIEW_TYPE_CHAT) {
+           TGChat chat = ((ChatView) viewHolder.itemView).getChat();
+-          if (chat != null && chat.isPinned() && adapter.canDragPinnedChats() && filter == null) {
++          if (chat != null && chat.isPinned() && adapter.canDragPinnedChats() && filter == null && !tdlib.settings().isFolderOrderFixed(chatFolderId())) {
+             int dragFlags = ItemTouchHelper.UP | ItemTouchHelper.DOWN;
+             return makeMovementFlags(dragFlags, 0);
+           }
 @@ -624,7 +624,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
          }
        });
@@ -1850,7 +2069,7 @@ index 070ed21..f275551 100644
          ids.append(R.id.more_btn_selectAll);
          strings.append(R.string.SelectMore);
          icons.append(R.drawable.baseline_playlist_add_check_24);
-@@ -1393,6 +1393,40 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1393,6 +1393,45 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
        strings.append(R.string.DeleteChatCache);
        icons.append(R.drawable.templarian_baseline_broom_24);
  
@@ -1863,6 +2082,11 @@ index 070ed21..f275551 100644
 +          ids.append(R.id.menu_btn_pinUnpin);
 +          strings.append(pinMode == ACTION_MODE_ALL_ENABLED ? R.string.UnpinFromTop : R.string.PinToTop);
 +          icons.append(pinMode == ACTION_MODE_ALL_ENABLED ? R.drawable.deproko_baseline_pin_undo_24 : R.drawable.deproko_baseline_pin_24);
++        }
++        if (canArchive + canUnarchive > 0) {
++          ids.append(canUnarchive > 0 ? R.id.more_btn_unarchive : R.id.more_btn_archive);
++          strings.append(canUnarchive > 0 ? R.string.Unarchive : R.string.Archive);
++          icons.append(canUnarchive > 0 ? R.drawable.baseline_unarchive_24 : R.drawable.baseline_archive_24);
 +        }
 +        if (Settings.instance().chatFoldersEnabled()) {
 +          ids.append(R.id.more_btn_addToFolder);
@@ -1891,7 +2115,7 @@ index 070ed21..f275551 100644
        getParentOrSelf().showMore(ids.get(), strings.get(), icons.get());
      } else if (id == R.id.menu_btn_pinUnpin) {
        int mode = canPinUnpinSelectedChats();
-@@ -1701,7 +1735,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1701,7 +1740,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onMoreItemPressed (int id) {
@@ -1905,7 +2129,7 @@ index 070ed21..f275551 100644
        long[] selectedChatIds = ArrayUtils.keys(selectedChats);
        tdlib.ui().showAddChatsToFolderOptions(this, selectedChatIds, this::onSelectionActionComplete);
        // break;
-@@ -1869,7 +1908,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1869,7 +1913,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
        strings.append(R.string.SelectAll);
        icons.append(R.drawable.baseline_playlist_add_check_24);
  
@@ -1914,7 +2138,7 @@ index 070ed21..f275551 100644
          ids.append(R.id.btn_selectUnread);
          strings.append(R.string.SelectUnread);
          icons.append(Config.ICON_MARK_AS_UNREAD);
-@@ -1881,11 +1920,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -1881,11 +1925,11 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
        showOptions(Lang.getString(R.string.SelectMore), ids.get(), strings.get(), null, icons.get(), (v, optionId) -> {
          if (optionId == R.id.btn_selectAll) {
@@ -1929,7 +2153,7 @@ index 070ed21..f275551 100644
          }
          return true;
        });
-@@ -2046,7 +2085,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2046,7 +2090,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void requestLoadMore () {
@@ -1938,7 +2162,7 @@ index 070ed21..f275551 100644
    }
  
    // Search mode
-@@ -2079,7 +2118,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2079,7 +2123,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    protected boolean filterChatMessageSearchResult (TdApi.Chat chat) {
@@ -1947,7 +2171,7 @@ index 070ed21..f275551 100644
    }
  
    @Override
-@@ -2247,7 +2286,10 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2247,7 +2291,10 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
              tdlib.ui().showArchiveOptions(this, tdlib.chatList(ChatPosition.CHAT_LIST_ARCHIVE));
            }
          } else {
@@ -1959,7 +2183,7 @@ index 070ed21..f275551 100644
          }
          return true;
        }
-@@ -2255,6 +2297,16 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -2255,6 +2302,16 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
      return false;
    }
  
@@ -1976,7 +2200,7 @@ index 070ed21..f275551 100644
    private LongSparseArray<TdApi.Chat> selectedChats;
  
    private int getSelectedChatCount () {
-@@ -3002,6 +3054,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
+@@ -3002,6 +3059,12 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
  
    @Override
    public void onChatCounterChanged (@NonNull TdApi.ChatList chatList, TdlibCounter counter, boolean availabilityChanged, int totalCount, int unreadCount, int unreadUnmutedCount) {
@@ -2078,7 +2302,7 @@ index e903305..bfa950c 100644
      return titles[pos];
    }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-index f81e95e..7c31569 100644
+index f81e95e..50fdc28 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 @@ -22,6 +22,9 @@ import android.content.Intent;
@@ -2420,16 +2644,28 @@ index f81e95e..7c31569 100644
        tdlib.checkDeadlocks(() -> runOnUiThreadOptional(() -> {
          if (isFocused()) {
            openSearchMode();
-@@ -2435,7 +2524,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2435,7 +2524,8 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      }
      if (isFolder) {
        options.item(new OptionItem(R.id.btn_editFolder, Lang.getString(R.string.EditFolder), OptionColor.NORMAL, R.drawable.baseline_edit_24));
 -      int chatFolderStyle = tdlib.settings().chatFolderStyle();
++      options.item(new OptionItem(R.id.btn_sviriFixedFolderOrder, Lang.getString(tdlib.settings().isFolderOrderFixed(chatFolderId) ? R.string.SviriFolderOrderLive : R.string.SviriFolderOrderFixed), OptionColor.NORMAL, R.drawable.deproko_baseline_pin_24));
 +      int chatFolderStyle = ChatFolderStyle.LABEL_ONLY;
        if (hasIcon(chatFolderStyle)) {
          options.item(new OptionItem(R.id.btn_changeFolderIcon, Lang.getString(R.string.ChatFolderChangeIcon), OptionColor.NORMAL, R.drawable.baseline_image_24));
        }
-@@ -2769,89 +2858,23 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2459,7 +2549,9 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+     }
+     options.item(new OptionItem(R.id.btn_chatFolders, Lang.getString(R.string.EditFolders), OptionColor.NORMAL, R.drawable.baseline_edit_folders_24));
+     showOptions(options.build(), (v, id) -> {
+-      if (id == R.id.btn_editFolder) {
++      if (id == R.id.btn_sviriFixedFolderOrder) {
++        tdlib.settings().setFolderOrderFixed(chatFolderId, !tdlib.settings().isFolderOrderFixed(chatFolderId));
++      } else if (id == R.id.btn_editFolder) {
+         tdlib.send(new TdApi.GetChatFolder(chatFolderId), (chatFolder, error) -> runOnUiThreadOptional(() -> {
+           if (error != null) {
+             UI.showError(error);
+@@ -2769,89 +2861,23 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    private void checkTabs () {
@@ -2536,7 +2772,7 @@ index f81e95e..7c31569 100644
    }
  
    private void checkMenu () {
-@@ -2872,7 +2895,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2872,7 +2898,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    private boolean displayTabsAtBottom () {
@@ -2545,7 +2781,7 @@ index f81e95e..7c31569 100644
    }
  
    private void initPagerSections () {
-@@ -2912,7 +2935,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2912,7 +2938,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        } else {
          archiveChatListPosition = NO_POSITION;
        }
@@ -2554,7 +2790,7 @@ index f81e95e..7c31569 100644
        chatLists = new ArrayList<>(chatListCount);
        sections = new ArrayList<>(chatListCount);
        int chatFolderIndex = 0;
-@@ -2991,7 +3014,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2991,7 +3017,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      int selectedFilter = getSelectedFilter(pagerItemId);
      Counter unreadCounter = buildUnreadCounter(pagerItemId, selectedFilter);
      if (unreadCounter != null) {
@@ -2563,7 +2799,7 @@ index f81e95e..7c31569 100644
        updateCounter(chatList, unreadCounter, counter, /* animated */ false);
      }
      boolean showIcon = hasIcon(chatFolderStyle) || (pagerItemId == MAIN_PAGER_ITEM_ID && pagerItemPosition == 0);
-@@ -3042,6 +3065,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3042,6 +3068,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    public static void updateCounter (Tdlib tdlib, TdApi.ChatList chatList, Counter target, TdlibCounter counter, boolean animated) {
@@ -2571,7 +2807,7 @@ index f81e95e..7c31569 100644
      int mutedCount, unmutedCount;
      int badgeFlags = tdlib.settings().getChatFolderBadgeFlags();
      boolean countMessages = BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_MESSAGES);
-@@ -3053,7 +3077,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3053,7 +3080,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        unmutedCount = Math.max(0, counter.chatUnmutedCount);
      }
      if (BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED) && chatList.getConstructor() == TdApi.ChatListMain.CONSTRUCTOR) {
@@ -2580,7 +2816,7 @@ index f81e95e..7c31569 100644
        if (countMessages) {
          mutedCount += Math.max(0, archiveCounter.messageCount);
          unmutedCount += Math.max(0, archiveCounter.messageUnmutedCount);
-@@ -3202,7 +3226,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3202,7 +3229,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
          }
          dispatchCounter(chatList, counter);
          if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
@@ -2589,7 +2825,7 @@ index f81e95e..7c31569 100644
          }
        });
      }
-@@ -3224,7 +3248,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3224,7 +3251,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        TdApi.ChatList chatList = pagerChatLists.get(i);
        ViewPagerTopView.Item section = pagerSections.get(i);
        if (section.counter != null) {
@@ -3424,6 +3660,164 @@ index 0000000..18bcf28
 +    holders.clear(); super.destroy();
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
+new file mode 100644
+index 0000000..9c31a40
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
+@@ -0,0 +1,152 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.content.Context;
++import android.graphics.Typeface;
++import android.graphics.drawable.GradientDrawable;
++import android.view.Gravity;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import android.widget.Toast;
++import androidx.recyclerview.widget.LinearLayoutManager;
++import androidx.recyclerview.widget.RecyclerView;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.component.sticker.StickerSmallView;
++import org.thunderdog.challegram.component.sticker.TGStickerObj;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.telegram.GiftSendPolicy;
++import org.thunderdog.challegram.theme.ColorId;
++import org.thunderdog.challegram.theme.Theme;
++import org.thunderdog.challegram.tool.Screen;
++import org.thunderdog.challegram.tool.UI;
++import org.thunderdog.challegram.v.CustomRecyclerView;
++import java.util.Locale;
++
++/** Native gift detail page; animation runs only on the opened gift. */
++public final class SviriGiftDetailsController extends RecyclerViewController<Void> {
++  private TdApi.ReceivedGift received;
++  private final Runnable changed;
++  private final long ownerId;
++  private SviriGiftFlow flow;
++  private DetailsAdapter adapter;
++  private StickerSmallView sticker;
++  private boolean saving, reading;
++  public SviriGiftDetailsController(Context context, Tdlib tdlib, TdApi.ReceivedGift gift, Runnable changed) {
++    super(context, tdlib); this.received = gift; this.changed = changed; this.ownerId = tdlib.myUserId();
++  }
++  @Override public int getId() { return R.id.controller_sviriGiftDetails; }
++  @Override public CharSequence getName() { return Lang.getString(R.string.SviriGiftDetails); }
++  @Override protected void onCreateView(Context context, CustomRecyclerView recycler) {
++    flow = new SviriGiftFlow(this, tdlib, () -> { changed.run(); refresh(); });
++    recycler.setLayoutManager(new LinearLayoutManager(context)); recycler.setItemAnimator(null);
++    recycler.setPadding(Screen.dp(16), Screen.dp(12), Screen.dp(16), Screen.dp(24));
++    adapter = new DetailsAdapter(); recycler.setAdapter(adapter); refresh();
++  }
++  private boolean current() { return !isDestroyed() && ownerId == tdlib.myUserId(); }
++  private void refresh() {
++    if (!current() || reading || received.receivedGiftId == null || received.receivedGiftId.isEmpty()) return;
++    reading = true;
++    tdlib.client().send(new TdApi.GetReceivedGift(received.receivedGiftId), result -> runOnUiThreadOptional(() -> {
++      reading = false; if (!current()) return;
++      if (result instanceof TdApi.ReceivedGift) { received = (TdApi.ReceivedGift) result; adapter.notifyItemChanged(0); }
++      else if (result instanceof TdApi.Error) UI.showToast(TD.toErrorString(result), Toast.LENGTH_SHORT);
++    }));
++  }
++  private void toggleSaved() {
++    if (!current() || saving || received.receivedGiftId == null || received.receivedGiftId.isEmpty()) return;
++    saving = true;
++    final boolean saved = !received.isSaved;
++    tdlib.client().send(new TdApi.ToggleGiftIsSaved(received.receivedGiftId, saved), result -> UI.post(() -> {
++      saving = false;
++      if (ownerId != tdlib.myUserId()) return;
++      if (result instanceof TdApi.Ok) {
++        received.isSaved = saved; changed.run();
++        if (current()) adapter.notifyItemChanged(0);
++      } else UI.showToast(result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse), Toast.LENGTH_SHORT);
++    }));
++  }
++  private TextView text(Context context, CharSequence value, int size, int color) {
++    TextView label = new TextView(context); label.setText(value); label.setTextSize(size);
++    label.setTextColor(color); label.setGravity(Gravity.CENTER);
++    label.setPadding(Screen.dp(12), Screen.dp(10), Screen.dp(12), Screen.dp(10));
++    return label;
++  }
++  private String rarity(TdApi.UpgradedGiftAttributeRarity value) {
++    if (value instanceof TdApi.UpgradedGiftAttributeRarityPerMille) {
++      int n = ((TdApi.UpgradedGiftAttributeRarityPerMille) value).perMille;
++      return n == 0 ? "<0.1%" : String.format(Locale.US, "%.1f%%", n / 10.0);
++    }
++    if (value instanceof TdApi.UpgradedGiftAttributeRarityUncommon) return Lang.getString(R.string.SviriRarityUncommon);
++    if (value instanceof TdApi.UpgradedGiftAttributeRarityRare) return Lang.getString(R.string.SviriRarityRare);
++    if (value instanceof TdApi.UpgradedGiftAttributeRarityEpic) return Lang.getString(R.string.SviriRarityEpic);
++    if (value instanceof TdApi.UpgradedGiftAttributeRarityLegendary) return Lang.getString(R.string.SviriRarityLegendary);
++    return "";
++  }
++  private void row(LinearLayout wrap, int labelId, String value, String badge) {
++    Context context = wrap.getContext(); LinearLayout row = new LinearLayout(context); row.setGravity(Gravity.CENTER_VERTICAL);
++    TextView label = text(context, Lang.getString(labelId), 14, Theme.getColor(ColorId.textLight)); label.setGravity(Gravity.START);
++    row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
++    TextView data = text(context, value + (badge.isEmpty() ? "" : " · " + badge), 14, Theme.getColor(ColorId.text)); data.setGravity(Gravity.END);
++    row.addView(data, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2)); wrap.addView(row);
++  }
++  private void action(LinearLayout wrap, int label, Runnable run) {
++    TextView button = text(wrap.getContext(), Lang.getString(label), 16, Theme.getColor(ColorId.textLink));
++    button.setMinHeight(Screen.dp(48)); button.setOnClickListener(view -> run.run()); wrap.addView(button);
++  }
++  private void render(LinearLayout wrap) {
++    if (sticker != null) { sticker.performDestroy(); sticker = null; }
++    wrap.removeAllViews();
++    boolean upgraded = received.gift instanceof TdApi.SentGiftUpgraded;
++    TdApi.UpgradedGift gift = upgraded ? ((TdApi.SentGiftUpgraded) received.gift).gift : null;
++    TdApi.Gift regular = received.gift instanceof TdApi.SentGiftRegular ? ((TdApi.SentGiftRegular) received.gift).gift : null;
++    if (gift == null && regular == null) return;
++    Context context = wrap.getContext();
++    int start = Theme.getColor(ColorId.filling), end = start, foreground = Theme.getColor(ColorId.text);
++    if (gift != null) { start = 0xff000000 | gift.backdrop.colors.centerColor; end = 0xff000000 | gift.backdrop.colors.edgeColor; foreground = 0xff000000 | gift.backdrop.colors.textColor; }
++    LinearLayout hero = new LinearLayout(context); hero.setOrientation(LinearLayout.VERTICAL); hero.setGravity(Gravity.CENTER);
++    GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{start,end}); background.setCornerRadius(Screen.dp(24)); hero.setBackground(background);
++    sticker = new StickerSmallView(context) { @Override public boolean onTouchEvent(android.view.MotionEvent e) { return false; } };
++    sticker.init(tdlib); sticker.setEmojiDisabled(); sticker.setForceHeight(Screen.dp(200));
++    TdApi.Sticker image = gift != null ? gift.model.sticker : regular.sticker;
++    TGStickerObj object = new TGStickerObj(tdlib, image, null, image.fullType);
++    if (object.getPreviewAnimation() != null) object.getPreviewAnimation().setIsStill(false);
++    sticker.setSticker(object); hero.addView(sticker, new LinearLayout.LayoutParams(Screen.dp(220),Screen.dp(200)));
++    TextView title = text(context, gift != null ? gift.title : Lang.getString(R.string.SviriReceivedGift), 25, foreground); title.setTypeface(null, Typeface.BOLD); hero.addView(title);
++    hero.addView(text(context, gift != null ? "#" + gift.number : regular.starCount + " ★", 16, foreground)); wrap.addView(hero);
++    row(wrap, R.string.SviriGiftOwner, tdlib.cache().userName(ownerId), "");
++    if (!received.isPrivate && received.senderId instanceof TdApi.MessageSenderUser) row(wrap, R.string.SviriGiftFrom, tdlib.cache().userName(((TdApi.MessageSenderUser) received.senderId).userId), "");
++    if (gift != null) {
++      row(wrap, R.string.SviriGiftModel, gift.model.name, rarity(gift.model.rarity));
++      row(wrap, R.string.SviriGiftBackdrop, gift.backdrop.name, rarity(gift.backdrop.rarity));
++      row(wrap, R.string.SviriGiftSymbol, gift.symbol.name, rarity(gift.symbol.rarity));
++    }
++    if (received.text != null && !received.text.text.isEmpty()) wrap.addView(text(context, received.text.text, 15, Theme.getColor(ColorId.text)));
++    action(wrap, received.isSaved ? R.string.SviriGiftRemoveProfile : R.string.SviriGiftShowProfile, this::toggleSaved);
++    if (GiftSendPolicy.transferable(received, (int)(System.currentTimeMillis()/1000))) {
++      row(wrap, R.string.SviriGiftTransferFee, received.transferStarCount + " ★", "");
++      action(wrap, R.string.SviriGiftTransferAction, () -> flow.transfer(received));
++    }
++    if (gift != null) action(wrap, R.string.SviriOpenGift, () -> tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null));
++    action(wrap, R.string.SviriGiftBuy, () -> navigateTo(new SviriGiftCatalogController(context(), tdlib)));
++    if (wrap.isAttachedToWindow()) sticker.attach();
++  }
++  private final class DetailsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
++    @Override public int getItemCount() { return 1; }
++    @Override public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int type) {
++      LinearLayout wrap = new LinearLayout(parent.getContext()); wrap.setOrientation(LinearLayout.VERTICAL);
++      wrap.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++      return new RecyclerView.ViewHolder(wrap) {};
++    }
++    @Override public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) { render((LinearLayout) holder.itemView); }
++    @Override public void onViewAttachedToWindow(RecyclerView.ViewHolder holder) { if (sticker != null) sticker.attach(); }
++    @Override public void onViewDetachedFromWindow(RecyclerView.ViewHolder holder) { if (sticker != null) sticker.detach(); }
++  }
++  @Override public void destroy() {
++    if (flow != null) flow.destroy(); if (sticker != null) sticker.performDestroy(); sticker = null; super.destroy();
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
 new file mode 100644
 index 0000000..ffda35a
@@ -3593,10 +3987,10 @@ index 0000000..ffda35a
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
-index 0000000..c18cd56
+index 0000000..cc9b333
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,300 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -3642,7 +4036,6 @@ index 0000000..c18cd56
 +  private String bio = "";
 +  private boolean balanceLoading;
 +  private int giftCount;
-+  private SviriGiftFlow giftFlow;
 +  private final Consumer<TdApi.StarAmount> balanceListener = value -> {
 +    if (!isDestroyed() && adapter != null) adapter.notifyItemChanged(0);
 +  };
@@ -3690,9 +4083,6 @@ index 0000000..c18cd56
 +  @Override public int getId () { return R.id.controller_sviriGifts; }
 +  @Override public CharSequence getName () { return Lang.getString(profile ? R.string.SviriProfile : R.string.SviriGifts); }
 +  @Override protected void onCreateView (Context context, CustomRecyclerView recycler) {
-+    giftFlow = new SviriGiftFlow(this, tdlib, () -> {
-+      generation++; loading = false; loaded = false; offset = ""; gifts.clear(); seen.clear(); load(); loadBalance();
-+    });
 +    GridLayoutManager grid = new GridLayoutManager(context, 3);
 +    grid.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
 +      @Override public int getSpanSize (int position) { return adapter.getItemViewType(position) == 1 ? 1 : 3; }
@@ -3757,21 +4147,12 @@ index 0000000..c18cd56
 +    view.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 +    return view;
 +  }
++  private void refreshGifts() {
++    if (isDestroyed()) return;
++    generation++; loading = false; loaded = false; offset = ""; gifts.clear(); seen.clear(); load(); loadBalance();
++  }
 +  private void showGift (TdApi.ReceivedGift received) {
-+    if (received.gift instanceof TdApi.SentGiftUpgraded) {
-+      TdApi.UpgradedGift gift = ((TdApi.SentGiftUpgraded) received.gift).gift;
-+      String details = gift.title + " #" + gift.number + "\n" + Lang.getString(R.string.SviriGiftModel) + ": " + gift.model.name + "\n" + Lang.getString(R.string.SviriGiftSymbol) + ": " + gift.symbol.name + "\n" + Lang.getString(R.string.SviriGiftBackdrop) + ": " + gift.backdrop.name;
-+      showOptions(details, new int[]{R.id.btn_sviriTransferGift, R.id.btn_sviriOpenGift, R.id.btn_cancel}, new String[]{Lang.getString(R.string.SviriGiftTransferAction), Lang.getString(R.string.SviriOpenGift), Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.baseline_share_24, R.drawable.dotvhs_baseline_gift_24, R.drawable.baseline_cancel_24}, (view, id) -> {
-+        if (id == R.id.btn_sviriTransferGift) giftFlow.transfer(received);
-+        if (id == R.id.btn_sviriOpenGift) tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null);
-+        return true;
-+      });
-+    } else {
-+      TdApi.Gift gift = ((TdApi.SentGiftRegular) received.gift).gift;
-+      String caption = gift.sticker.emoji + " · " + gift.starCount + " ★";
-+      if (received.text != null && !received.text.text.isEmpty()) caption += "\n" + received.text.text;
-+      showOptions(caption, new int[]{R.id.btn_cancel}, new String[]{Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.baseline_cancel_24}, (view, id) -> true);
-+    }
++    navigateTo(new SviriGiftDetailsController(context(), tdlib, received, this::refreshGifts));
 +  }
 +  private final class Card extends RecyclerView.ViewHolder {
 +    final StickerSmallView sticker;
@@ -3902,7 +4283,6 @@ index 0000000..c18cd56
 +    @Override public void onViewRecycled (RecyclerView.ViewHolder holder) { if (holder instanceof Card) ((Card) holder).sticker.setSticker(null); }
 +  }
 +  @Override public void destroy () {
-+    if (giftFlow != null) giftFlow.destroy();
 +    generation++;
 +    tdlib.removeStarAmountListener(balanceListener);
 +    for (Card card : cards) card.sticker.performDestroy();
@@ -3971,7 +4351,7 @@ index 0000000..a013a63
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
 +circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
 diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
-index 98ed3d2..360c876 100644
+index 98ed3d2..c28515f 100644
 --- a/app/src/main/res/values/ids.xml
 +++ b/app/src/main/res/values/ids.xml
 @@ -1,5 +1,11 @@
@@ -3986,7 +4366,7 @@ index 98ed3d2..360c876 100644
    <item type="id" name="app_root" />
    <item type="id" name="app_container" />
  
-@@ -1433,4 +1439,15 @@
+@@ -1433,4 +1439,17 @@
    <item type="id" name="btn_playback_speed_1_2" />
    <item type="id" name="btn_playback_speed_1_5" />
    <item type="id" name="btn_playback_speed_2_0" />
@@ -4001,10 +4381,12 @@ index 98ed3d2..360c876 100644
 +  <item type="id" name="menu_btn_sviriForwardFolder" />
 +  <item type="id" name="controller_sviriGiftCatalog" />
 +  <item type="id" name="btn_sviriTransferGift" />
++  <item type="id" name="btn_sviriFixedFolderOrder" />
++  <item type="id" name="controller_sviriGiftDetails" />
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..f4feb3e 100644
+index 416f9af..7f1d3e6 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -4023,7 +4405,7 @@ index 416f9af..f4feb3e 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,74 @@
+@@ -5909,4 +5919,86 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -4097,6 +4479,18 @@ index 416f9af..f4feb3e 100644
 +  <string name="SviriForwardOptions">Forwarding options</string>
 +  <string name="SviriHideForwardAuthor">Hide original sender</string>
 +  <string name="SviriRemoveForwardCaptions">Remove captions (also hides original sender)</string>
++  <string name="SviriFolderOrderFixed">Fix chat order in this folder</string>
++  <string name="SviriFolderOrderLive">Sort folder by new messages</string>
++  <string name="SviriGiftDetails">Gift details</string>
++  <string name="SviriGiftOwner">Owner</string>
++  <string name="SviriGiftFrom">From</string>
++  <string name="SviriGiftShowProfile">Show on profile</string>
++  <string name="SviriGiftRemoveProfile">Remove from profile</string>
++  <string name="SviriRarityUncommon">Uncommon</string>
++  <string name="SviriRarityRare">Rare</string>
++  <string name="SviriRarityEpic">Epic</string>
++  <string name="SviriRarityLegendary">Legendary</string>
++  <string name="SviriGiftTransferFee">Transfer fee</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
@@ -4590,10 +4984,10 @@ index 0000000..3ca51ef
 +    subprocess.run(['java', '-cp', str(temp), 'org.thunderdog.challegram.ui.GiftFlowTest'], check=True)
 diff --git a/tests/sviri/check_slice.py b/tests/sviri/check_slice.py
 new file mode 100644
-index 0000000..7673641
+index 0000000..bf05916
 --- /dev/null
 +++ b/tests/sviri/check_slice.py
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,147 @@
 +#!/usr/bin/env python3
 +"""Exercise the real list slice against small TDLib boundary doubles."""
 +from pathlib import Path
@@ -4613,7 +5007,7 @@ index 0000000..7673641
 + 'org/drinkless/tdlib/TdApi.java': '''package org.drinkless.tdlib;
 +public class TdApi {
 + public static class Function<T> {}
-+ public static class ChatList {}
++ public static class ChatList {} public static class ChatListFolder extends ChatList { public int chatFolderId; public ChatListFolder(int id){chatFolderId=id;} }
 + public static class ChatPosition { public long order; public boolean isPinned; public Object source; }
 + public static class Chat { public long id; public ChatPosition position = new ChatPosition(); public Chat(long id){ this.id=id; position.order=10000-id; } }
 +}''',
@@ -4633,6 +5027,12 @@ index 0000000..7673641
 +}''',
 + 'org/thunderdog/challegram/telegram/TdlibSettingsManager.java': '''package org.thunderdog.challegram.telegram; import java.util.*;
 +public class TdlibSettingsManager {
++ public interface FolderOrderListener { void onFolderOrderChanged(int id); }
++ boolean fixed; java.util.List<FolderOrderListener> folderListeners=new java.util.ArrayList<>();
++ FolderChatOrder order=new FolderChatOrder(new FolderChatOrder.Storage(){long[] ids;public long[] read(){return ids;}public void write(long[] value){ids=value;}});
++ public boolean isFolderOrderFixed(int id){return fixed;} public FolderChatOrder folderChatOrder(int id){return order;}
++ public void addFolderOrderListener(FolderOrderListener l){folderListeners.add(l);} public void removeFolderOrderListener(FolderOrderListener l){folderListeners.remove(l);}
++ public void fixed(boolean value){fixed=value; for(var l:new java.util.ArrayList<>(folderListeners))l.onFolderOrderChanged(7);}
 + public interface HiddenChatsListener { void onHiddenChatChanged(long id); }
 + Set<Long> hidden = new HashSet<>(); List<HiddenChatsListener> listeners = new ArrayList<>();
 + public boolean isChatHidden(long id){return hidden.contains(id);}
@@ -4699,7 +5099,28 @@ index 0000000..7673641
 +  for(int i=3;i<=82;i++)source.add(i,true);
 +  check(d.ids.size()==42,"duplicate scroll does not inflate page limit");
 +  source.pending.run();check(callbacks[0]==2,"all completion callbacks delivered");
-+  slice.performDestroy();System.out.println("PASS: real slice with TDLib doubles: pagination, hide/unhide, coalescing, cleanup");
++  slice.performDestroy();
++  td=new Tdlib();source=new TdlibChatList(td);source.list=new TdApi.ChatListFolder(7);
++  for(int i=1;i<=200;i++)source.add(i,false);source.end=true;
++  td.settings.order.remember(new long[]{1,2,3});td.settings.fixed=true;
++  slice=new TdlibChatListSlice(td,source,null,false,null);d=new Display();slice.initializeList(d,d::append,200,null);
++  var before=new ArrayList<>(d.ids); var moved=td.chat(150);moved.position.order=999999;
++  source.listener.onChatMoved(source,moved,149,0,new Tdlib.ChatChange(moved.position,15));
++  check(d.ids.equals(before),"200 fixed chats remain in place on new message");
++  td.settings.hide(2,true);check(!d.ids.contains(2L),"fixed mode respects hidden chats");
++  td.settings.hide(2,false);check(d.ids.get(1)==2L,"unhidden chat resumes saved rank");
++  source.add(201,true);slice.loadMore(1,null);check(d.ids.get(d.ids.size()-1)==201L,"new chats append without moving old chats");
++  td.settings.fixed(false);check(d.ids.get(0)==150L,"live mode restores latest-message sorting");
++  td.settings.fixed(true);check(d.ids.get(0)==1L,"fixed mode restores persistent order");
++  source.listener.onChatRemoved(source,td.chat(3),2,new Tdlib.ChatChange(td.chat(3).position,15));
++  check(!d.ids.contains(3L),"fixed chats can still leave folder");
++  slice.performDestroy();check(td.settings.folderListeners.isEmpty(),"order listener released");
++  final long[][] saved={null};
++  FolderChatOrder.Storage storage=new FolderChatOrder.Storage(){ public long[] read(){return saved[0];}public void write(long[] ids){saved[0]=ids;} };
++  FolderChatOrder order=new FolderChatOrder(storage);order.remember(new long[]{9,3,9,7});
++  order=new FolderChatOrder(storage);check(order.rank(9)==0&&order.rank(3)==1&&order.rank(7)==2,"ranks survive recreation and deduplicate");
++  check(order.rank(1)==3,"new rank appends after restart");
++  System.out.println("PASS: slice pagination, visibility, fixed folder ordering, 200 chats and cleanup");
 + }
 +}'''
 +}
@@ -4711,6 +5132,7 @@ index 0000000..7673641
 +        path.write_text(content)
 +    sources = [str(folder / name) for name in fixtures]
 +    sources.append(str(root / 'app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java'))
++    sources.append(str(root / 'app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java'))
 +    subprocess.run(['java', 'com.sun.tools.javac.Main', '-d', tmp, *sources], check=True)
 +    subprocess.run(['java', '-cp', tmp, 'org.thunderdog.challegram.telegram.SliceTest'], check=True)
 diff --git a/tests/sviri/check_stars.py b/tests/sviri/check_stars.py
