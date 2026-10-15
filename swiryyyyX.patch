@@ -636,6 +636,77 @@ index 0000000..24db67e
 +      : Lang.getString(R.string.SviriFolderStopped, completed, total, error), Toast.LENGTH_LONG);
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java
+new file mode 100644
+index 0000000..a52bd0e
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.tool.UI;
++import java.util.HashSet;
++import java.util.function.Consumer;
++
++/** One user-confirmed gift write per account. Never retry financial operations automatically. */
++public final class GiftPaymentTask {
++  private static final HashSet<Integer> active = new HashSet<>();
++  public static boolean send (Tdlib tdlib, TdApi.Function<?> request, Consumer<TdApi.Object> callback) {
++    if (!(request instanceof TdApi.SendGift || request instanceof TdApi.TransferGift)) throw new IllegalArgumentException();
++    if (!active.add(tdlib.id())) return false;
++    tdlib.incrementJobReferenceCount("swir-gift-payment");
++    final boolean[] finished = {false};
++    tdlib.client().send(request, result -> UI.post(() -> {
++      if (finished[0]) return;
++      finished[0] = true;
++      active.remove(tdlib.id());
++      tdlib.decrementJobReferenceCount("swir-gift-payment");
++      callback.accept(result);
++    }));
++    return true;
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftSendPolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftSendPolicy.java
+new file mode 100644
+index 0000000..6f0249e
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/GiftSendPolicy.java
+@@ -0,0 +1,33 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import org.drinkless.tdlib.TdApi;
++
++/** Checks server-provided gift metadata before presenting or accepting a price. */
++public final class GiftSendPolicy {
++  private GiftSendPolicy () { }
++  public static boolean available (TdApi.Gift gift) {
++    return gift != null && gift.id != 0 && gift.starCount >= 0 && gift.auctionInfo == null
++      && (gift.userLimits == null || gift.userLimits.remainingCount > 0)
++      && (gift.overallLimits == null || gift.overallLimits.remainingCount > 0);
++  }
++  public static boolean transferable (TdApi.ReceivedGift gift, long nowSeconds) {
++    return gift != null && gift.receivedGiftId != null && !gift.receivedGiftId.isEmpty()
++      && gift.gift instanceof TdApi.SentGiftUpgraded && gift.canBeTransferred && !gift.wasRefunded
++      && gift.transferStarCount >= 0 && gift.nextTransferDate <= nowSeconds;
++  }
++  public static boolean enoughStars (TdApi.StarAmount balance, long cost) {
++    return balance != null && cost >= 0 && (balance.starCount > cost
++      || balance.starCount == cost && balance.nanostarCount >= 0);
++  }
++  /** A quote can authorize exactly one write, and only at its displayed price and recipient. */
++  public static final class Confirmation {
++    public final long userId, starCount;
++    private boolean used;
++    public Confirmation (long userId, long starCount) { this.userId = userId; this.starCount = starCount; }
++    public boolean consume (long currentUserId, long currentStarCount) {
++      if (used || userId <= 0 || starCount < 0 || currentUserId != userId || currentStarCount != starCount) return false;
++      used = true; return true;
++    }
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java b/app/src/main/java/org/thunderdog/challegram/telegram/HiddenChatStore.java
 new file mode 100644
 index 0000000..3145a1b
@@ -2810,7 +2881,7 @@ index 0000000..0097add
 +  @Override public void destroy () { generation++; tdlib.removeStarAmountListener(balanceListener); super.destroy(); }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
-index 606de78..9c660f3 100644
+index 606de78..561354e 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 @@ -78,6 +78,8 @@ import org.thunderdog.challegram.navigation.ViewController;
@@ -2827,14 +2898,18 @@ index 606de78..9c660f3 100644
  
    private int getMenuItemCount () {
 -    int count = 1;
-+    int count = canForwardSavedToFolder() ? 2 : 1;
++    int count = 1 + (mode == MODE_MESSAGES ? 1 : 0) + (canForwardSavedToFolder() ? 1 : 0) + (canCopyLink() ? 1 : 0);
      if (canExportContent()) {
        count++;
      }
-@@ -402,6 +404,11 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -402,6 +404,15 @@ public class ShareController extends TelegramViewController<ShareController.Args
    @Override
    public void fillMenuItems (int id, HeaderView header, LinearLayout menu) {
      if (id == R.id.menu_search) {
++      if (mode == MODE_MESSAGES) {
++        HeaderButton options = header.addButton(menu, R.id.btn_menu_customize, getHeaderIconColorId(), this, R.drawable.baseline_tune_24, Screen.dp(49f), R.drawable.bg_btn_header);
++        options.setContentDescription(Lang.getString(R.string.SviriForwardOptions));
++      }
 +      if (canForwardSavedToFolder()) {
 +        HeaderButton folder = header.addButton(menu, R.id.menu_btn_sviriForwardFolder, getHeaderIconColorId(), this, R.drawable.baseline_folder_24, Screen.dp(49f), R.drawable.bg_btn_header);
 +        folder.setContentDescription(Lang.getString(R.string.SviriForwardFolder));
@@ -2843,7 +2918,7 @@ index 606de78..9c660f3 100644
        if (canCopyLink()) {
          header.addButton(menu, R.id.menu_btn_copy, getHeaderIconColorId(), this, R.drawable.baseline_link_24, Screen.dp(49f), R.drawable.bg_btn_header);
        }
-@@ -437,7 +444,16 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -437,7 +448,16 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    @Override
    public void onMenuItemPressed (int id, View view) {
@@ -2861,7 +2936,16 @@ index 606de78..9c660f3 100644
        if (getDisplayingChats() != null) {
          openSearchMode();
        }
-@@ -1519,7 +1535,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -446,7 +466,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+     } else if (id == R.id.menu_btn_forward) {
+       exportContent();
+     } else if (id == R.id.btn_menu_customize) {
+-      reloadMessageProperties(this::showShareSettings);
++      if (!folderForwardLoading && !folderForwardRunning && !isSent) reloadMessageProperties(this::showShareSettings);
+     } else if (id == R.id.menu_btn_clear) {
+       clearSearchInput();
+     }
+@@ -1519,7 +1539,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        if (displayingChats != null) {
          TGFoundChat parsedChat = newChat(chatList.chatList(), chat);
          displayingChats.add(atIndex, parsedChat);
@@ -2870,7 +2954,7 @@ index 606de78..9c660f3 100644
            if (isEmptyItem(adapter.getItem(0))) {
              adapter.removeItem(0);
            }
-@@ -1536,7 +1552,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1536,7 +1556,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        List<TGFoundChat> displayingChats = getChatsByChatList(chatList.chatList());
        if (displayingChats != null) {
          displayingChats.remove(fromIndex);
@@ -2879,7 +2963,7 @@ index 606de78..9c660f3 100644
            adapter.removeItem(fromIndex);
            recyclerView.invalidateItemDecorations();
          }
-@@ -1551,7 +1567,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1551,7 +1571,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        if (displayingChats != null) {
          TGFoundChat entry = displayingChats.remove(fromIndex);
          displayingChats.add(toIndex, entry);
@@ -2888,7 +2972,7 @@ index 606de78..9c660f3 100644
            LinearLayoutManager manager = (LinearLayoutManager) recyclerView.getLayoutManager();
            int savedPosition, savedOffset;
            if (manager != null) {
-@@ -1968,7 +1984,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1968,7 +1988,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    private boolean toggleCheckedImpl (View view, TGFoundChat chat, @Nullable RunnableBool after, boolean performAsyncChecks) {
      long chatId = chat.getAnyId();
@@ -2897,7 +2981,7 @@ index 606de78..9c660f3 100644
        return false;
      }
  
-@@ -2019,6 +2035,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2019,6 +2039,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void updateHeader () {
@@ -2908,7 +2992,7 @@ index 606de78..9c660f3 100644
      if (selectedChats.size() == 0) {
        headerCell.setSubtitle(Lang.lowercase(Lang.getString(R.string.SelectChats)));
      } else if (selectedChats.size() == 1) {
-@@ -2466,8 +2486,20 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2466,8 +2490,20 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void displayChatList (CharSequence title, TdApi.ChatList chatList) {
@@ -2930,7 +3014,7 @@ index 606de78..9c660f3 100644
      headerCell.setTitle(StringUtils.isEmptyOrBlank(title) ? getName() : title);
      displayingChatList = chatList;
      if (getListByChatList(chatList) != null) {
-@@ -2495,7 +2527,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2495,7 +2531,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        displayingChats.addAll(chats);
      }
  
@@ -2939,7 +3023,7 @@ index 606de78..9c660f3 100644
        if (isEmptyItem(adapter.getItem(0))) {
          adapter.getItems().remove(0);
          adapter.notifyItemRemoved(0);
-@@ -2969,7 +3001,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2969,7 +3005,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    private void checkAbilityToSend () {
      final int selectedCount = selectedChats.size();
@@ -2948,7 +3032,50 @@ index 606de78..9c660f3 100644
  
      if (canShareLink) {
        sendButton.setIsReady(isReady, true);
-@@ -3361,7 +3393,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3296,6 +3332,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+   }
+ 
+   private void showShareSettings (TdApi.MessageProperties[] messageProperties) {
++    if (isDestroyed() || isSent || folderForwardLoading || folderForwardRunning) return;
+     boolean canRemoveCaptions = false;
+     int canSendWithoutSound = 0;
+     boolean hasSecretChats = false;
+@@ -3304,10 +3341,11 @@ public class ShareController extends TelegramViewController<ShareController.Args
+ 
+     if (mode == MODE_MESSAGES) {
+       Args args = getArgumentsStrict();
++      if (messageProperties == null || messageProperties.length != args.messages.length) return;
+       for (int i = 0; i < args.messages.length; i++) {
+         TdApi.Message message = args.messages[i];
+         TdApi.MessageProperties properties = messageProperties[i];
+-        if (!properties.canBeCopied) {
++        if (properties == null || !properties.canBeCopied) {
+           canBeCopied = false;
+           break;
+         }
+@@ -3316,9 +3354,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
+         }
+       }
+       if (canBeCopied) {
+-        items.add(new ListItem(ListItem.TYPE_CHECKBOX_OPTION, R.id.btn_hideAuthor, 0, R.string.SendAsCopy, R.id.btn_hideAuthor, needHideAuthor));
++        items.add(new ListItem(ListItem.TYPE_CHECKBOX_OPTION, R.id.btn_hideAuthor, 0, R.string.SviriHideForwardAuthor, R.id.btn_hideAuthor, needHideAuthor));
+         if (canRemoveCaptions) {
+-          items.add(new ListItem(ListItem.TYPE_CHECKBOX_OPTION, R.id.btn_removeCaptions, 0, R.string.RemoveCaptions, R.id.btn_removeCaptions, needRemoveCaptions));
++          items.add(new ListItem(ListItem.TYPE_CHECKBOX_OPTION, R.id.btn_removeCaptions, 0, R.string.SviriRemoveForwardCaptions, R.id.btn_removeCaptions, needRemoveCaptions));
+         }
+       }
+     }
+@@ -3345,8 +3383,8 @@ public class ShareController extends TelegramViewController<ShareController.Args
+ 
+     ListItem[] itemsArray = items.toArray(new ListItem[0]);
+     showSettings(R.id.btn_menu_customize, itemsArray, (id, result) -> {
+-      needHideAuthor = result.get(R.id.btn_hideAuthor) == R.id.btn_hideAuthor;
+       needRemoveCaptions = result.get(R.id.btn_removeCaptions) == R.id.btn_removeCaptions;
++      needHideAuthor = needRemoveCaptions || result.get(R.id.btn_hideAuthor) == R.id.btn_hideAuthor;
+       forceSendWithoutSound = result.get(R.id.btn_sendNoSound) == R.id.btn_sendNoSound;
+     });
+   }
+@@ -3361,7 +3399,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void sendMessages (boolean forceGoToChat, boolean isSingleTap, @Nullable TdApi.MessageSendOptions finalSendOptions, boolean reloadProperties) {
@@ -2957,7 +3084,7 @@ index 606de78..9c660f3 100644
        return;
      }
  
-@@ -3373,12 +3405,17 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3373,12 +3411,17 @@ public class ShareController extends TelegramViewController<ShareController.Args
      // Double check if there are any new restrictions
      for (int i = 0; i < selectedChats.size(); i++) {
        long chatId = selectedChats.valueAt(i).getChatId();
@@ -2975,7 +3102,7 @@ index 606de78..9c660f3 100644
      final TdApi.FormattedText comment = inputView.getOutputText(true);
  
      //noinspection UnsafeOptInUsageError
-@@ -3392,6 +3429,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3392,6 +3435,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
      for (int i = 0; i < selectedChatIds.size(); i++) {
        final long chatId = selectedChatIds.get(i);
@@ -2983,7 +3110,7 @@ index 606de78..9c660f3 100644
        if (showErrorMessage(null, chatId, true))
          return;
  
-@@ -3504,8 +3542,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3504,8 +3548,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
          default:
            return;
        }
@@ -2994,7 +3121,7 @@ index 606de78..9c660f3 100644
      if (functions.size() == 1) {
        tdlib.client().send(functions.get(0), tdlib.messageHandler());
      } else {
-@@ -3660,6 +3700,171 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3660,6 +3706,171 @@ public class ShareController extends TelegramViewController<ShareController.Args
      }
    }
  
@@ -3166,7 +3293,7 @@ index 606de78..9c660f3 100644
    private @Nullable PopupLayout folderSelectorLayout;
  
    private static class FolderMenuWrap extends MenuMoreWrap {
-@@ -3682,6 +3887,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3682,6 +3893,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void showFolderSelector () {
@@ -3174,7 +3301,7 @@ index 606de78..9c660f3 100644
      if (headerView == null)
        return;
      FolderMenuWrap menu = new FolderMenuWrap(context);
-@@ -3720,6 +3926,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3720,6 +3932,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    @Override
    public void destroy () {
@@ -3184,12 +3311,290 @@ index 606de78..9c660f3 100644
      super.destroy();
      for (TdlibChatListSlice list : listByChatList.values()) {
        list.performDestroy();
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftCatalogController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftCatalogController.java
+new file mode 100644
+index 0000000..18bcf28
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftCatalogController.java
+@@ -0,0 +1,105 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.content.Context;
++import android.graphics.drawable.GradientDrawable;
++import android.view.Gravity;
++import android.view.ViewGroup;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import androidx.recyclerview.widget.GridLayoutManager;
++import androidx.recyclerview.widget.RecyclerView;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.component.sticker.StickerSmallView;
++import org.thunderdog.challegram.component.sticker.TGStickerObj;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.telegram.GiftSendPolicy;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.theme.ColorId;
++import org.thunderdog.challegram.theme.Theme;
++import org.thunderdog.challegram.tool.Screen;
++import org.thunderdog.challegram.v.CustomRecyclerView;
++import java.util.ArrayList;
++
++/** Server gift catalog with recycled, still-frame sticker cards. */
++public final class SviriGiftCatalogController extends RecyclerViewController<Void> {
++  private final ArrayList<TdApi.Gift> gifts = new ArrayList<>();
++  private final ArrayList<Holder> holders = new ArrayList<>();
++  private final CatalogAdapter adapter = new CatalogAdapter();
++  private SviriGiftFlow flow;
++  private boolean loading;
++  private String error;
++  public SviriGiftCatalogController (Context context, Tdlib tdlib) { super(context, tdlib); }
++  @Override public int getId () { return R.id.controller_sviriGiftCatalog; }
++  @Override public CharSequence getName () { return Lang.getString(R.string.SviriGiftBuy); }
++  @Override protected void onCreateView (Context context, CustomRecyclerView recycler) {
++    flow = new SviriGiftFlow(this, tdlib, this::load);
++    GridLayoutManager grid = new GridLayoutManager(context, 3);
++    grid.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
++      @Override public int getSpanSize (int position) { return position == 0 ? 3 : 1; }
++    });
++    recycler.setLayoutManager(grid); recycler.setItemAnimator(null);
++    recycler.setPadding(Screen.dp(8), Screen.dp(8), Screen.dp(8), Screen.dp(16));
++    recycler.setAdapter(adapter); load();
++  }
++  private void load () {
++    if (isDestroyed() || loading) return;
++    loading = true; error = null; adapter.notifyItemChanged(0);
++    tdlib.client().send(new TdApi.GetAvailableGifts(), result -> runOnUiThreadOptional(() -> {
++      if (isDestroyed()) return;
++      loading = false;
++      if (result instanceof TdApi.AvailableGifts) {
++        gifts.clear();
++        for (TdApi.AvailableGift value : ((TdApi.AvailableGifts) result).gifts) if (GiftSendPolicy.available(value.gift)) gifts.add(value.gift);
++      } else error = result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse);
++      adapter.notifyDataSetChanged();
++    }));
++  }
++  private final class Holder extends RecyclerView.ViewHolder {
++    final StickerSmallView sticker;
++    final TextView label;
++    Holder (Context context, boolean header) {
++      super(new LinearLayout(context));
++      LinearLayout wrap = (LinearLayout) itemView; wrap.setOrientation(LinearLayout.VERTICAL); wrap.setGravity(Gravity.CENTER);
++      wrap.setPadding(Screen.dp(8), Screen.dp(12), Screen.dp(8), Screen.dp(12));
++      wrap.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++      if (!header) {
++        GradientDrawable background = new GradientDrawable(); background.setColor(Theme.getColor(ColorId.filling)); background.setCornerRadius(Screen.dp(20)); wrap.setBackground(background);
++        sticker = new StickerSmallView(context) {
++          @Override public boolean onTouchEvent (android.view.MotionEvent event) { return false; }
++        };
++        sticker.init(tdlib); sticker.setForceHeight(Screen.dp(88)); sticker.setEmojiDisabled();
++        wrap.addView(sticker, new LinearLayout.LayoutParams(Screen.dp(88), Screen.dp(88))); holders.add(this);
++      } else sticker = null;
++      label = new TextView(context); label.setTextSize(15); label.setGravity(Gravity.CENTER); label.setTextColor(Theme.getColor(ColorId.text)); wrap.addView(label);
++    }
++  }
++  private final class CatalogAdapter extends RecyclerView.Adapter<Holder> {
++    @Override public int getItemCount () { return gifts.size() + 1; }
++    @Override public int getItemViewType (int position) { return position == 0 ? 0 : 1; }
++    @Override public Holder onCreateViewHolder (ViewGroup parent, int type) { return new Holder(parent.getContext(), type == 0); }
++    @Override public void onBindViewHolder (Holder holder, int position) {
++      if (position == 0) {
++        holder.label.setText(loading ? Lang.getString(R.string.LoadingInformation) : error != null ? error + "\n" + Lang.getString(R.string.SviriRetry) : gifts.isEmpty() ? Lang.getString(R.string.SviriGiftUnavailable) : Lang.getString(R.string.SviriGiftCatalogHint));
++        holder.itemView.setOnClickListener(view -> load()); return;
++      }
++      TdApi.Gift gift = gifts.get(position - 1);
++      TGStickerObj object = new TGStickerObj(tdlib, gift.sticker, null, gift.sticker.fullType);
++      if (object.getPreviewAnimation() != null) object.getPreviewAnimation().setIsStill(true);
++      holder.sticker.setSticker(object);
++      holder.label.setText(gift.sticker.emoji + " · " + gift.starCount + " ★" + (gift.isPremium ? "\nPremium" : ""));
++      holder.itemView.setContentDescription(holder.label.getText());
++      holder.itemView.setOnClickListener(view -> flow.purchase(gift));
++    }
++    @Override public void onViewAttachedToWindow (Holder holder) { if (holder.sticker != null) holder.sticker.attach(); }
++    @Override public void onViewDetachedFromWindow (Holder holder) { if (holder.sticker != null) holder.sticker.detach(); }
++    @Override public void onViewRecycled (Holder holder) { if (holder.sticker != null) holder.sticker.setSticker(null); }
++  }
++  @Override public void destroy () {
++    if (flow != null) flow.destroy();
++    for (Holder holder : holders) holder.sticker.performDestroy();
++    holders.clear(); super.destroy();
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
+new file mode 100644
+index 0000000..e99611a
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
+@@ -0,0 +1,161 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.app.AlertDialog;
++import android.content.Context;
++import android.widget.CheckBox;
++import android.widget.LinearLayout;
++import android.widget.Toast;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.navigation.ViewController;
++import org.thunderdog.challegram.util.SenderPickerDelegate;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.telegram.GiftPaymentTask;
++import org.thunderdog.challegram.telegram.GiftSendPolicy;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.tool.Screen;
++import org.thunderdog.challegram.tool.UI;
++import java.util.HashMap;
++import java.util.function.Consumer;
++
++/** Recipient lookup, fresh quote and explicit confirmation for a single gift. */
++final class SviriGiftFlow {
++  private static final HashMap<Integer, SviriGiftFlow> active = new HashMap<>();
++  private final Context context;
++  private final ViewController<?> owner;
++  private final Tdlib tdlib;
++  private final Runnable changed;
++  private AlertDialog dialog;
++  private boolean closed, writing, privateSender;
++  private int generation;
++  private long giftId, userId, sourceUserId;
++  private String receivedId, recipient;
++  SviriGiftFlow (ViewController<?> owner, Tdlib tdlib, Runnable changed) {
++    this.owner = owner; this.context = owner.context(); this.tdlib = tdlib; this.changed = changed;
++  }
++  void purchase (TdApi.Gift gift) { if (begin()) { giftId = gift.id; receivedId = null; chooseRecipient(); } }
++  void transfer (TdApi.ReceivedGift gift) {
++    if (gift == null || gift.receivedGiftId == null || gift.receivedGiftId.isEmpty()) { toast(Lang.getString(R.string.SviriGiftCannotTransfer)); return; }
++    if (begin()) { receivedId = gift.receivedGiftId; chooseRecipient(); }
++  }
++  private boolean begin () {
++    if (closed) return false;
++    if (active.containsKey(tdlib.id())) { toast(Lang.getString(R.string.SviriGiftBusy)); return false; }
++    active.put(tdlib.id(), this); privateSender = false; sourceUserId = tdlib.myUserId(); generation++; return true;
++  }
++  private void release () { if (active.get(tdlib.id()) == this) active.remove(tdlib.id()); }
++  private void cancel () { generation++; release(); }
++  void destroy () { closed = true; generation++; if (dialog != null) dialog.dismiss(); if (!writing) release(); }
++  private void toast (String value) { UI.showToast(value, Toast.LENGTH_LONG); }
++  private void fail (String value) { if (dialog != null) dialog.dismiss(); if (!closed) toast(value); cancel(); }
++  private String error (TdApi.Object result) { return result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse); }
++  private void read (TdApi.Function<?> request, Consumer<TdApi.Object> callback) {
++    int token = generation;
++    Runnable timeout = () -> { if (!closed && token == generation) fail(Lang.getString(R.string.SviriGiftReadFailed)); };
++    UI.post(timeout, 30000L);
++    tdlib.client().send(request, result -> UI.post(() -> {
++      UI.removePendingRunnable(timeout);
++      if (!closed && token == generation && active.get(tdlib.id()) == this) {
++        if (sourceUserId != tdlib.myUserId()) { fail(Lang.getString(R.string.SviriGiftAccountChanged)); return; }
++        callback.accept(result);
++      }
++    }));
++  }
++  private void chooseRecipient () {
++    final boolean[] chosen = {false};
++    ContactsController picker = new ContactsController(context, tdlib) {
++      @Override public void destroy () { if (!chosen[0]) SviriGiftFlow.this.cancel(); super.destroy(); }
++    };
++    picker.setArguments(new ContactsController.Args(new SenderPickerDelegate() {
++      @Override public boolean allowGlobalSearch () { return true; }
++      @Override public String getUserPickTitle () { return Lang.getString(R.string.SviriGiftRecipient); }
++      @Override public boolean onSenderPick (ContactsController controller, android.view.View view, TdApi.MessageSender sender) {
++        if (chosen[0] || closed) return false;
++        if (!(sender instanceof TdApi.MessageSenderUser) || ((TdApi.MessageSenderUser) sender).userId == sourceUserId) {
++          toast(Lang.getString(R.string.SviriGiftUserOnly)); return false;
++        }
++        chosen[0] = true;
++        long id = ((TdApi.MessageSenderUser) sender).userId;
++        read(new TdApi.GetUser(id), result -> {
++          if (!(result instanceof TdApi.User)) { fail(error(result)); return; }
++          TdApi.User user = (TdApi.User) result;
++          if (user.id != id) { fail(Lang.getString(R.string.SviriUnexpectedResponse)); return; }
++          if (!(user.type instanceof TdApi.UserTypeRegular)) { fail(Lang.getString(R.string.SviriGiftUserOnly)); return; }
++          userId = id;
++          String username = user.usernames != null && user.usernames.activeUsernames.length > 0 ? "@" + user.usernames.activeUsernames[0] + " · " : "";
++          recipient = user.firstName + " " + user.lastName + "\n" + username + "ID " + id;
++          prepare(null);
++        });
++        return true;
++      }
++    }));
++    if (!owner.navigateTo(picker)) cancel();
++  }
++  private void prepare (GiftSendPolicy.Confirmation approved) {
++    if (receivedId != null) read(new TdApi.GetReceivedGift(receivedId), result -> {
++      if (!(result instanceof TdApi.ReceivedGift)) { fail(error(result)); return; }
++      TdApi.ReceivedGift gift = (TdApi.ReceivedGift) result;
++      if (!receivedId.equals(gift.receivedGiftId) || !GiftSendPolicy.transferable(gift, System.currentTimeMillis() / 1000L)) {
++        fail(Lang.getString(R.string.SviriGiftCannotTransfer)); return;
++      }
++      TdApi.UpgradedGift upgraded = ((TdApi.SentGiftUpgraded) gift.gift).gift;
++      quote(upgraded.title + " #" + upgraded.number, gift.transferStarCount, approved);
++    });
++    else read(new TdApi.GetAvailableGifts(), result -> {
++      if (!(result instanceof TdApi.AvailableGifts)) { fail(error(result)); return; }
++      TdApi.Gift found = null;
++      for (TdApi.AvailableGift entry : ((TdApi.AvailableGifts) result).gifts) if (entry.gift.id == giftId) { found = entry.gift; break; }
++      if (!GiftSendPolicy.available(found)) { fail(Lang.getString(R.string.SviriGiftUnavailable)); return; }
++      TdApi.Gift gift = found;
++      TdApi.User self = tdlib.cache().user(tdlib.myUserId());
++      if (gift.isPremium && (self == null || !self.isPremium)) { fail(Lang.getString(R.string.SviriGiftPremium)); return; }
++      Runnable ready = () -> quote(gift.sticker.emoji + " · " + Lang.getString(R.string.SviriReceivedGift), gift.starCount, approved);
++      if (gift.nextSendDate > System.currentTimeMillis() / 1000L) read(new TdApi.CanSendGift(gift.id), value -> {
++        if (value instanceof TdApi.CanSendGiftResultOk) ready.run();
++        else fail(value instanceof TdApi.CanSendGiftResultFail ? ((TdApi.CanSendGiftResultFail) value).reason.text : error(value));
++      }); else ready.run();
++    });
++  }
++  private void quote (String title, long price, GiftSendPolicy.Confirmation approved) {
++    read(new TdApi.GetStarTransactions(new TdApi.MessageSenderUser(tdlib.myUserId()), "", null, "", 1), result -> {
++      if (!(result instanceof TdApi.StarTransactions)) { fail(error(result)); return; }
++      TdApi.StarAmount balance = ((TdApi.StarTransactions) result).starAmount;
++      if (!GiftSendPolicy.enoughStars(balance, price)) { fail(Lang.getString(R.string.SviriGiftInsufficient, price)); return; }
++      if (approved != null && approved.consume(userId, price)) { send(price); return; }
++      if (approved != null) toast(Lang.getString(R.string.SviriGiftPriceChanged));
++      GiftSendPolicy.Confirmation confirmation = new GiftSendPolicy.Confirmation(userId, price);
++      LinearLayout content = new LinearLayout(context); content.setOrientation(LinearLayout.VERTICAL);
++      android.widget.TextView details = new android.widget.TextView(context);
++      details.setText(title + "\n\n" + recipient + "\n\n" + Lang.getString(R.string.SviriGiftTotal, price));
++      details.setPadding(Screen.dp(24), Screen.dp(12), Screen.dp(24), Screen.dp(12)); content.addView(details);
++      CheckBox privacy = new CheckBox(context); privacy.setText(R.string.SviriGiftPrivate); privacy.setChecked(privateSender);
++      if (receivedId == null) content.addView(privacy);
++      final boolean[] confirmed = {false};
++      dialog = new AlertDialog.Builder(context).setTitle(receivedId == null ? R.string.SviriGiftBuy : R.string.SviriGiftTransferAction)
++        .setView(content).setNegativeButton(R.string.Cancel, (d, which) -> cancel())
++        .setPositiveButton(Lang.getString(R.string.SviriGiftConfirm, price), (d, which) -> {
++          if (confirmed[0] || writing || closed) return;
++          confirmed[0] = true;
++          privateSender = privacy.isChecked(); prepare(confirmation);
++        }).create();
++      dialog.setOnCancelListener(d -> cancel()); dialog.show();
++    });
++  }
++  private void send (long price) {
++    if (closed || writing) return;
++    if (sourceUserId != tdlib.myUserId()) { fail(Lang.getString(R.string.SviriGiftAccountChanged)); return; }
++    TdApi.Function<?> request = receivedId != null
++      ? new TdApi.TransferGift("", receivedId, new TdApi.MessageSenderUser(userId), price)
++      : new TdApi.SendGift(giftId, new TdApi.MessageSenderUser(userId), new TdApi.FormattedText("", new TdApi.TextEntity[0]), privateSender, false);
++    writing = true;
++    if (!GiftPaymentTask.send(tdlib, request, result -> {
++      writing = false; release();
++      if (result instanceof TdApi.Ok) {
++        toast(Lang.getString(R.string.SviriGiftSent)); if (!closed) changed.run();
++      } else if (!closed) toast(error(result) + "\n" + Lang.getString(R.string.SviriGiftCheckBeforeRetry));
++    })) { writing = false; fail(Lang.getString(R.string.SviriGiftBusy)); }
++    else toast(Lang.getString(R.string.SviriGiftSending));
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
-index 0000000..72da59a
+index 0000000..c18cd56
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
-@@ -0,0 +1,302 @@
+@@ -0,0 +1,314 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -3235,6 +3640,7 @@ index 0000000..72da59a
 +  private String bio = "";
 +  private boolean balanceLoading;
 +  private int giftCount;
++  private SviriGiftFlow giftFlow;
 +  private final Consumer<TdApi.StarAmount> balanceListener = value -> {
 +    if (!isDestroyed() && adapter != null) adapter.notifyItemChanged(0);
 +  };
@@ -3282,6 +3688,9 @@ index 0000000..72da59a
 +  @Override public int getId () { return R.id.controller_sviriGifts; }
 +  @Override public CharSequence getName () { return Lang.getString(profile ? R.string.SviriProfile : R.string.SviriGifts); }
 +  @Override protected void onCreateView (Context context, CustomRecyclerView recycler) {
++    giftFlow = new SviriGiftFlow(this, tdlib, () -> {
++      generation++; loading = false; loaded = false; offset = ""; gifts.clear(); seen.clear(); load(); loadBalance();
++    });
 +    GridLayoutManager grid = new GridLayoutManager(context, 3);
 +    grid.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
 +      @Override public int getSpanSize (int position) { return adapter.getItemViewType(position) == 1 ? 1 : 3; }
@@ -3350,7 +3759,8 @@ index 0000000..72da59a
 +    if (received.gift instanceof TdApi.SentGiftUpgraded) {
 +      TdApi.UpgradedGift gift = ((TdApi.SentGiftUpgraded) received.gift).gift;
 +      String details = gift.title + " #" + gift.number + "\n" + Lang.getString(R.string.SviriGiftModel) + ": " + gift.model.name + "\n" + Lang.getString(R.string.SviriGiftSymbol) + ": " + gift.symbol.name + "\n" + Lang.getString(R.string.SviriGiftBackdrop) + ": " + gift.backdrop.name;
-+      showOptions(details, new int[]{R.id.btn_sviriOpenGift, R.id.btn_cancel}, new String[]{Lang.getString(R.string.SviriOpenGift), Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.dotvhs_baseline_gift_24, R.drawable.baseline_cancel_24}, (view, id) -> {
++      showOptions(details, new int[]{R.id.btn_sviriTransferGift, R.id.btn_sviriOpenGift, R.id.btn_cancel}, new String[]{Lang.getString(R.string.SviriGiftTransferAction), Lang.getString(R.string.SviriOpenGift), Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.baseline_share_24, R.drawable.dotvhs_baseline_gift_24, R.drawable.baseline_cancel_24}, (view, id) -> {
++        if (id == R.id.btn_sviriTransferGift) giftFlow.transfer(received);
 +        if (id == R.id.btn_sviriOpenGift) tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null);
 +        return true;
 +      });
@@ -3439,6 +3849,10 @@ index 0000000..72da59a
 +        settings.setTextColor(Theme.getColor(ColorId.textLink));
 +        settings.setOnClickListener(view -> navigateTo(new SettingsController(context, tdlib)));
 +        wrap.addView(settings);
++        TextView buy = text(context, Lang.getString(R.string.SviriGiftBuy), 16);
++        buy.setTextColor(Theme.getColor(ColorId.textLink));
++        buy.setOnClickListener(view -> navigateTo(new SviriGiftCatalogController(context, tdlib)));
++        wrap.addView(buy);
 +      } else wrap.addView(text(context, "", type == 2 ? 20 : 15));
 +      return new RecyclerView.ViewHolder(wrap) {};
 +    }
@@ -3466,6 +3880,8 @@ index 0000000..72da59a
 +        TextView label = (TextView) ((LinearLayout) holder.itemView).getChildAt(0);
 +        if (type == 2) {
 +          label.setText(Lang.getString(R.string.SviriGifts) + (giftCount > 0 ? " · " + giftCount : "")); label.setTextColor(Theme.getColor(ColorId.textLink)); label.setTextSize(16);
++          label.setContentDescription(Lang.getString(R.string.SviriGiftBuy));
++          label.setOnClickListener(view -> navigateTo(new SviriGiftCatalogController(context(), tdlib)));
 +          GradientDrawable pill = new GradientDrawable(); pill.setColor(0x22339fed); pill.setCornerRadius(Screen.dp(28)); label.setBackground(pill);
 +          LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT); params.setMargins(0, Screen.dp(14), 0, Screen.dp(12)); label.setLayoutParams(params);
 +        }
@@ -3484,6 +3900,7 @@ index 0000000..72da59a
 +    @Override public void onViewRecycled (RecyclerView.ViewHolder holder) { if (holder instanceof Card) ((Card) holder).sticker.setSticker(null); }
 +  }
 +  @Override public void destroy () {
++    if (giftFlow != null) giftFlow.destroy();
 +    generation++;
 +    tdlib.removeStarAmountListener(balanceListener);
 +    for (Card card : cards) card.sticker.performDestroy();
@@ -3552,7 +3969,7 @@ index 0000000..a013a63
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
 +circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
 diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
-index 98ed3d2..501db2a 100644
+index 98ed3d2..360c876 100644
 --- a/app/src/main/res/values/ids.xml
 +++ b/app/src/main/res/values/ids.xml
 @@ -1,5 +1,11 @@
@@ -3567,7 +3984,7 @@ index 98ed3d2..501db2a 100644
    <item type="id" name="app_root" />
    <item type="id" name="app_container" />
  
-@@ -1433,4 +1439,13 @@
+@@ -1433,4 +1439,15 @@
    <item type="id" name="btn_playback_speed_1_2" />
    <item type="id" name="btn_playback_speed_1_5" />
    <item type="id" name="btn_playback_speed_2_0" />
@@ -3580,10 +3997,12 @@ index 98ed3d2..501db2a 100644
 +  <item type="id" name="btn_sviriStars" />
 +  <item type="id" name="btn_sviriGifts" />
 +  <item type="id" name="menu_btn_sviriForwardFolder" />
++  <item type="id" name="controller_sviriGiftCatalog" />
++  <item type="id" name="btn_sviriTransferGift" />
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..bbf89ea 100644
+index 416f9af..f8b7a0a 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -3602,7 +4021,7 @@ index 416f9af..bbf89ea 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,51 @@
+@@ -5909,4 +5919,74 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -3653,6 +4072,29 @@ index 416f9af..bbf89ea 100644
 +  <string name="SviriFolderBusy">A folder forward is already running for this account.</string>
 +  <string name="SviriFolderFinished">Forwarded to %1$d chats.</string>
 +  <string name="SviriFolderCooldown">Telegram requested a wait. Try again in %1$d seconds.</string>
++  <string name="SviriGiftRecipient">Choose recipient</string>
++  <string name="SviriGiftUsername">Enter a Telegram username.</string>
++  <string name="SviriGiftUserOnly">Choose another person. Bots and channels are not supported here.</string>
++  <string name="SviriGiftBuy">Send a new gift</string>
++  <string name="SviriGiftTransferAction">Transfer collectible gift</string>
++  <string name="SviriGiftBusy">A gift operation is already open or awaiting confirmation from Telegram.</string>
++  <string name="SviriGiftReadFailed">Could not verify the gift. Nothing was sent. Try again.</string>
++  <string name="SviriGiftCannotTransfer">This gift cannot be transferred now. It may be locked, refunded, or no longer owned by you.</string>
++  <string name="SviriGiftUnavailable">This gift is unavailable for direct purchase.</string>
++  <string name="SviriGiftPremium">Telegram Premium is required for this gift.</string>
++  <string name="SviriGiftInsufficient">Not enough Telegram Stars. Required: %1$d ★.</string>
++  <string name="SviriGiftPriceChanged">The price changed. Review the new total and confirm again.</string>
++  <string name="SviriGiftTotal">Total: %1$d ★</string>
++  <string name="SviriGiftConfirm">Confirm · %1$d ★</string>
++  <string name="SviriGiftPrivate">Hide my name and message from other people</string>
++  <string name="SviriGiftSent">Gift sent successfully.</string>
++  <string name="SviriGiftSending">Sending gift…</string>
++  <string name="SviriGiftCheckBeforeRetry">Check your balance and gifts before trying again. The request will not be retried automatically.</string>
++  <string name="SviriGiftAccountChanged">The signed-in user changed. Open the gift again.</string>
++  <string name="SviriGiftCatalogHint">Choose a gift, then its recipient. The total is shown before confirmation. Tap here to refresh.</string>
++  <string name="SviriForwardOptions">Forwarding options</string>
++  <string name="SviriHideForwardAuthor">Hide original sender</string>
++  <string name="SviriRemoveForwardCaptions">Remove captions (also hides original sender)</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
@@ -3950,10 +4392,10 @@ index 0000000..568aa9a
 +}
 diff --git a/tests/sviri/check_folder_sender.py b/tests/sviri/check_folder_sender.py
 new file mode 100644
-index 0000000..3831439
+index 0000000..2df6c95
 --- /dev/null
 +++ b/tests/sviri/check_folder_sender.py
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,114 @@
 +#!/usr/bin/env python3
 +"""Compile the actual sender against pinned TDLib; simulate replies without sending anything."""
 +from pathlib import Path
@@ -4036,15 +4478,111 @@ index 0000000..3831439
 + }
 +}'''
 +})
++files['GiftPolicyTest.java']='''import java.util.*;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;
++public class GiftPolicyTest {
++ static void check(boolean v){if(!v)throw new AssertionError();}
++ public static void main(String[] args){
++  TdApi.Gift gift=new TdApi.Gift();gift.id=1;gift.starCount=25;
++  check(GiftSendPolicy.available(gift));gift.overallLimits=new TdApi.GiftPurchaseLimits(10,0);check(!GiftSendPolicy.available(gift));
++  gift.overallLimits=null;gift.userLimits=new TdApi.GiftPurchaseLimits(1,0);check(!GiftSendPolicy.available(gift));
++  gift.userLimits=null;gift.starCount=-1;check(!GiftSendPolicy.available(gift));
++  TdApi.ReceivedGift received=new TdApi.ReceivedGift();received.receivedGiftId="own-gift";received.gift=new TdApi.SentGiftUpgraded();received.canBeTransferred=true;received.transferStarCount=25;
++  check(GiftSendPolicy.transferable(received,100));received.nextTransferDate=101;check(!GiftSendPolicy.transferable(received,100));
++  received.nextTransferDate=100;check(GiftSendPolicy.transferable(received,100));received.wasRefunded=true;check(!GiftSendPolicy.transferable(received,100));
++  received.wasRefunded=false;received.gift=new TdApi.SentGiftRegular();check(!GiftSendPolicy.transferable(received,100));
++  check(GiftSendPolicy.enoughStars(new TdApi.StarAmount(25,0),25));check(!GiftSendPolicy.enoughStars(new TdApi.StarAmount(25,-1),25));
++  check(GiftSendPolicy.enoughStars(new TdApi.StarAmount(26,-999999999),25));check(!GiftSendPolicy.enoughStars(new TdApi.StarAmount(24,999999999),25));check(!GiftSendPolicy.enoughStars(null,0));
++  var quote=new GiftSendPolicy.Confirmation(123,25);check(!quote.consume(456,25));check(!quote.consume(123,26));check(quote.consume(123,25));check(!quote.consume(123,25));
++  Tdlib td=new Tdlib();td.account=30;List<TdApi.Object> results=new ArrayList<>();
++  check(GiftPaymentTask.send(td,new TdApi.SendGift(),results::add));check(td.refs==1&&td.sends==1);check(!GiftPaymentTask.send(td,new TdApi.TransferGift(),results::add));
++  var callback=td.reply;callback.onResult(new TdApi.Ok());callback.onResult(new TdApi.Ok());check(td.refs==0&&results.size()==1);
++  check(GiftPaymentTask.send(td,new TdApi.TransferGift(),results::add));td.reply.onResult(new TdApi.Error(429,"FLOOD_WAIT_30"));check(td.refs==0&&td.sends==2&&results.size()==2);
++  System.out.println("PASS: gift availability, ownership metadata, transfer lock, exact Stars balance, single-use price/recipient confirmation and one financial request per account");
++ }
++}'''
 +with tempfile.TemporaryDirectory() as tmp:
 + temp=Path(tmp)
 + files['org/drinkless/tdlib/TdApi.java']=api.read_text()
-+ for name in ['FolderForwardSender.java','FolderForwardQueue.java','FolderForwardTask.java','MessageListener.java']:
++ for name in ['FolderForwardSender.java','FolderForwardQueue.java','FolderForwardTask.java','GiftSendPolicy.java','GiftPaymentTask.java','MessageListener.java']:
 +  files['org/thunderdog/challegram/telegram/'+name]=(root/'app/src/main/java/org/thunderdog/challegram/telegram'/name).read_text()
 + for path,content in files.items(): p=temp/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(content)
 + subprocess.run(['java','-Xmx1g','com.sun.tools.javac.Main','-d',str(temp),*[str(temp/name) for name in files]],check=True)
 + subprocess.run(['java','-cp',str(temp),'SenderTest'],check=True)
 + subprocess.run(['java','-cp',str(temp),'TaskTest'],check=True)
++ subprocess.run(['java','-cp',str(temp),'GiftPolicyTest'],check=True)
+diff --git a/tests/sviri/check_gift_flow.py b/tests/sviri/check_gift_flow.py
+new file mode 100644
+index 0000000..ee4c8a3
+--- /dev/null
++++ b/tests/sviri/check_gift_flow.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++"""Exercise the actual gift UI flow with Android/TDLib doubles, without network writes."""
++from pathlib import Path
++import runpy, tempfile, subprocess, re
++root = Path(__file__).resolve().parents[2]
++base = runpy.run_path(str(root / 'tests/sviri/check_folder_sender.py'))
++files = dict(base['files'])
++files.update({
++'android/content/Context.java': 'package android.content; public class Context {}',
++'android/content/DialogInterface.java': 'package android.content; public interface DialogInterface {interface OnClickListener {void onClick(DialogInterface d,int which);} interface OnCancelListener{void onCancel(DialogInterface d);}}',
++'android/app/AlertDialog.java': '''package android.app;import android.content.*;public class AlertDialog implements DialogInterface {
++ public static AlertDialog last;public DialogInterface.OnClickListener positive,negative;public DialogInterface.OnCancelListener cancel;
++ public void dismiss(){}public void show(){last=this;}public void setOnCancelListener(DialogInterface.OnCancelListener c){cancel=c;}
++ public void confirm(){positive.onClick(this,1);dismiss();}
++ public static class Builder{AlertDialog d=new AlertDialog();public Builder(Context c){}public Builder setTitle(int t){return this;}public Builder setView(Object v){return this;}
++ public Builder setNegativeButton(int t,DialogInterface.OnClickListener l){d.negative=l;return this;}public Builder setPositiveButton(String t,DialogInterface.OnClickListener l){d.positive=l;return this;}
++ public AlertDialog create(){return d;}}
++}''',
++'android/view/View.java': 'package android.view;public class View {}',
++'android/widget/LinearLayout.java': 'package android.widget;import android.content.Context;public class LinearLayout {public static final int VERTICAL=1;public LinearLayout(Context c){}public void setOrientation(int o){}public void addView(Object v){}}',
++'android/widget/TextView.java': 'package android.widget;import android.content.Context;public class TextView {public TextView(Context c){}public void setText(String t){}public void setPadding(int a,int b,int c,int d){}}',
++'android/widget/CheckBox.java': 'package android.widget;import android.content.Context;public class CheckBox {boolean checked;public CheckBox(Context c){}public void setText(int t){}public void setChecked(boolean v){checked=v;}public boolean isChecked(){return checked;}}',
++'org/thunderdog/challegram/tool/Screen.java': 'package org.thunderdog.challegram.tool;public class Screen {public static int dp(int n){return n;}}',
++'org/thunderdog/challegram/navigation/ViewController.java': 'package org.thunderdog.challegram.navigation;import android.content.Context;public class ViewController<T> {public Context context(){return new Context();}public boolean navigateTo(ViewController<?> c){return true;}}',
++'org/thunderdog/challegram/ui/ContactsController.java': '''package org.thunderdog.challegram.ui;import android.content.Context;import org.thunderdog.challegram.telegram.Tdlib;import org.thunderdog.challegram.navigation.ViewController;import org.thunderdog.challegram.util.SenderPickerDelegate;
++public class ContactsController extends ViewController<Object> {public static ContactsController last;public Args args;public ContactsController(Context c,Tdlib t){last=this;}public void destroy(){}public void setArguments(Args a){args=a;}public static class Args{public SenderPickerDelegate delegate;public Args(SenderPickerDelegate d){delegate=d;}}}''',
++'org/thunderdog/challegram/ui/GiftFlowTest.java': '''package org.thunderdog.challegram.ui;
++import java.util.*;import android.app.AlertDialog;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;import org.thunderdog.challegram.navigation.ViewController;
++public class GiftFlowTest {
++ static void check(boolean v){if(!v)throw new AssertionError();}
++ static TdApi.Gift gift(long cost){TdApi.Gift g=new TdApi.Gift();g.id=55;g.starCount=cost;g.sticker=new TdApi.Sticker();g.sticker.emoji="gift";return g;}
++ static void catalog(Tdlib t,long cost){check(t.lastRequest instanceof TdApi.GetAvailableGifts);t.reply.onResult(new TdApi.AvailableGifts(new TdApi.AvailableGift[]{new TdApi.AvailableGift(gift(cost),0,0,"")}));}
++ static void balance(Tdlib t){check(t.lastRequest instanceof TdApi.GetStarTransactions);TdApi.StarTransactions b=new TdApi.StarTransactions();b.starAmount=new TdApi.StarAmount(1000,0);t.reply.onResult(b);}
++ static void received(Tdlib t,long price){check(t.lastRequest instanceof TdApi.GetReceivedGift);TdApi.ReceivedGift g=new TdApi.ReceivedGift();g.receivedGiftId="owned";g.canBeTransferred=true;g.transferStarCount=price;TdApi.UpgradedGift u=new TdApi.UpgradedGift();u.title="Bunny";u.number=12;g.gift=new TdApi.SentGiftUpgraded(u);t.reply.onResult(g);}
++ static void recipient(Tdlib t){var p=ContactsController.last;check(p.args.delegate.onSenderPick(p,null,new TdApi.MessageSenderUser(123)));check(t.lastRequest instanceof TdApi.GetUser);TdApi.User u=new TdApi.User();u.id=123;u.firstName="Friend";u.lastName="";u.type=new TdApi.UserTypeRegular();t.reply.onResult(u);}
++ public static void main(String[] args){
++  Tdlib td=new Tdlib();td.account=41;int[] changed={0};var flow=new SviriGiftFlow(new ViewController<>(),td,()->changed[0]++);
++  flow.purchase(gift(25));recipient(td);catalog(td,25);balance(td);
++  AlertDialog first=AlertDialog.last;first.confirm();var requestAfterConfirm=td.lastRequest;first.confirm();check(td.lastRequest==requestAfterConfirm);catalog(td,30);balance(td);
++  check(!(td.lastRequest instanceof TdApi.SendGift));AlertDialog.last.confirm();catalog(td,30);balance(td);
++  check(td.lastRequest instanceof TdApi.SendGift);TdApi.SendGift send=(TdApi.SendGift)td.lastRequest;check(send.giftId==55&&((TdApi.MessageSenderUser)send.ownerId).userId==123&&!send.payForUpgrade&&send.text.text.isEmpty());
++  td.reply.onResult(new TdApi.Ok());check(changed[0]==1&&td.refs==0);
++  flow.purchase(gift(25));ContactsController.last.destroy();check(td.refs==0);flow.purchase(gift(25));recipient(td);flow.destroy();catalog(td,25);check(!(td.lastRequest instanceof TdApi.SendGift));
++  Tdlib transferTd=new Tdlib();transferTd.account=42;var transferFlow=new SviriGiftFlow(new ViewController<>(),transferTd,()->changed[0]++);
++  TdApi.ReceivedGift seed=new TdApi.ReceivedGift();seed.receivedGiftId="owned";transferFlow.transfer(seed);recipient(transferTd);received(transferTd,5);balance(transferTd);
++  AlertDialog.last.confirm();received(transferTd,7);balance(transferTd);check(!(transferTd.lastRequest instanceof TdApi.TransferGift));
++  AlertDialog.last.confirm();received(transferTd,7);balance(transferTd);check(transferTd.lastRequest instanceof TdApi.TransferGift);
++  TdApi.TransferGift transfer=(TdApi.TransferGift)transferTd.lastRequest;check(transfer.receivedGiftId.equals("owned")&&transfer.starCount==7&&((TdApi.MessageSenderUser)transfer.newOwnerId).userId==123);
++  transferFlow.destroy();transferTd.reply.onResult(new TdApi.Ok());check(transferTd.refs==0&&changed[0]==1);
++  System.out.println("PASS: actual gift flow: native recipient picker, double-confirm guard, fresh-price reconfirmation, exact purchase and transfer requests, cancellation, completion after UI close and no write after destruction");
++ }
++}'''
++})
++flow = (root / 'app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java').read_text()
++files['org/thunderdog/challegram/ui/SviriGiftFlow.java'] = flow
++files['org/thunderdog/challegram/util/SenderPickerDelegate.java'] = (root / 'app/src/main/java/org/thunderdog/challegram/util/SenderPickerDelegate.java').read_text()
++files['org/thunderdog/challegram/telegram/Tdlib.java'] = files['org/thunderdog/challegram/telegram/Tdlib.java'].replace('public Handler reply;', 'public Handler reply;public TdApi.Function<?> lastRequest;').replace('sends++;reply=h;', 'sends++;lastRequest=f;reply=h;').replace('public int account=7,refs;', 'public long myUserId(){return 999;} public Tdlib cache(){return this;} public TdApi.User user(long id){TdApi.User u=new TdApi.User();u.isPremium=true;return u;} public int account=7,refs;')
++resources = set(re.findall(r'R.string.(\w+)', flow)) | {'SviriFolderBusy', 'SviriFolderLoadFailed', 'SviriFolderCooldown', 'SviriFolderRecipientChanged', 'SviriFolderFinished', 'SviriFolderStopped'}
++files['org/thunderdog/challegram/R.java'] = 'package org.thunderdog.challegram;public class R {public static class string {' + ''.join('public static final int ' + name + '=' + str(i) + ';' for i, name in enumerate(sorted(resources))) + '}}'
++with tempfile.TemporaryDirectory() as tmp:
++    temp = Path(tmp)
++    for name, content in files.items():
++        path = temp / name
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(content)
++    subprocess.run(['java', '-Xmx1g', 'com.sun.tools.javac.Main', '-d', str(temp), *[str(temp / name) for name in files]], check=True)
++    subprocess.run(['java', '-cp', str(temp), 'org.thunderdog.challegram.ui.GiftFlowTest'], check=True)
 diff --git a/tests/sviri/check_slice.py b/tests/sviri/check_slice.py
 new file mode 100644
 index 0000000..7673641
