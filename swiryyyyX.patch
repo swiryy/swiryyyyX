@@ -3424,7 +3424,7 @@ index 0000000..18bcf28
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
 new file mode 100644
-index 0000000..e99611a
+index 0000000..2424e57
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
 @@ -0,0 +1,161 @@
@@ -3584,7 +3584,7 @@ index 0000000..e99611a
 +      writing = false; release();
 +      if (result instanceof TdApi.Ok) {
 +        toast(Lang.getString(R.string.SviriGiftSent)); if (!closed) changed.run();
-+      } else if (!closed) toast(error(result) + "\n" + Lang.getString(R.string.SviriGiftCheckBeforeRetry));
++      } else toast(error(result) + "\n" + Lang.getString(R.string.SviriGiftCheckBeforeRetry));
 +    })) { writing = false; fail(Lang.getString(R.string.SviriGiftBusy)); }
 +    else toast(Lang.getString(R.string.SviriGiftSending));
 +  }
