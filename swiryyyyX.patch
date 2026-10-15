@@ -567,10 +567,10 @@ index 0000000..7e2c6ac
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardTask.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardTask.java
 new file mode 100644
-index 0000000..24db67e
+index 0000000..47a069a
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardTask.java
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,67 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.telegram;
 +
@@ -596,6 +596,7 @@ index 0000000..24db67e
 +    }
 +  }
 +  private final Tdlib tdlib;
++  private final long sourceUserId;
 +  private final ArrayList<Batch> batches;
 +  private final FolderForwardSender sender;
 +  private final FolderForwardQueue queue;
@@ -613,9 +614,10 @@ index 0000000..24db67e
 +    return null;
 +  }
 +  private FolderForwardTask (Tdlib tdlib, List<Batch> batches) {
-+    this.tdlib = tdlib; this.batches = new ArrayList<>(batches);
++    this.tdlib = tdlib; this.sourceUserId = tdlib.myUserId(); this.batches = new ArrayList<>(batches);
 +    sender = new FolderForwardSender(tdlib);
 +    queue = new FolderForwardQueue(batches.size(), (index, callback) -> {
++      if (tdlib.myUserId() != sourceUserId) { callback.accept(Lang.getString(R.string.SviriAccountChanged)); return; }
 +      Batch batch = this.batches.get(index);
 +      if (tdlib.settings().isChatHidden(batch.chatId)) {
 +        callback.accept(Lang.getString(R.string.SviriFolderRecipientChanged)); return;
@@ -3424,7 +3426,7 @@ index 0000000..18bcf28
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
 new file mode 100644
-index 0000000..2424e57
+index 0000000..ffda35a
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
 @@ -0,0 +1,161 @@
@@ -3488,7 +3490,7 @@ index 0000000..2424e57
 +    tdlib.client().send(request, result -> UI.post(() -> {
 +      UI.removePendingRunnable(timeout);
 +      if (!closed && token == generation && active.get(tdlib.id()) == this) {
-+        if (sourceUserId != tdlib.myUserId()) { fail(Lang.getString(R.string.SviriGiftAccountChanged)); return; }
++        if (sourceUserId != tdlib.myUserId()) { fail(Lang.getString(R.string.SviriAccountChanged)); return; }
 +        callback.accept(result);
 +      }
 +    }));
@@ -3575,7 +3577,7 @@ index 0000000..2424e57
 +  }
 +  private void send (long price) {
 +    if (closed || writing) return;
-+    if (sourceUserId != tdlib.myUserId()) { fail(Lang.getString(R.string.SviriGiftAccountChanged)); return; }
++    if (sourceUserId != tdlib.myUserId()) { fail(Lang.getString(R.string.SviriAccountChanged)); return; }
 +    TdApi.Function<?> request = receivedId != null
 +      ? new TdApi.TransferGift("", receivedId, new TdApi.MessageSenderUser(userId), price)
 +      : new TdApi.SendGift(giftId, new TdApi.MessageSenderUser(userId), new TdApi.FormattedText("", new TdApi.TextEntity[0]), privateSender, false);
@@ -4002,7 +4004,7 @@ index 98ed3d2..360c876 100644
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..f8b7a0a 100644
+index 416f9af..f4feb3e 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -4090,7 +4092,7 @@ index 416f9af..f8b7a0a 100644
 +  <string name="SviriGiftSent">Gift sent successfully.</string>
 +  <string name="SviriGiftSending">Sending gift…</string>
 +  <string name="SviriGiftCheckBeforeRetry">Check your balance and gifts before trying again. The request will not be retried automatically.</string>
-+  <string name="SviriGiftAccountChanged">The signed-in user changed. Open the gift again.</string>
++  <string name="SviriAccountChanged">The signed-in user changed. Open this screen again.</string>
 +  <string name="SviriGiftCatalogHint">Choose a gift, then its recipient. The total is shown before confirmation. Tap here to refresh.</string>
 +  <string name="SviriForwardOptions">Forwarding options</string>
 +  <string name="SviriHideForwardAuthor">Hide original sender</string>
@@ -4392,10 +4394,10 @@ index 0000000..568aa9a
 +}
 diff --git a/tests/sviri/check_folder_sender.py b/tests/sviri/check_folder_sender.py
 new file mode 100644
-index 0000000..2df6c95
+index 0000000..86be2c5
 --- /dev/null
 +++ b/tests/sviri/check_folder_sender.py
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,117 @@
 +#!/usr/bin/env python3
 +"""Compile the actual sender against pinned TDLib; simulate replies without sending anything."""
 +from pathlib import Path
@@ -4419,7 +4421,7 @@ index 0000000..2df6c95
 +'org/thunderdog/challegram/telegram/Tdlib.java':'''package org.thunderdog.challegram.telegram;import org.drinkless.tdlib.TdApi;
 + public class Tdlib {
 + public interface Handler{void onResult(TdApi.Object o);}public Handler reply;public int sends,cacheUpdates;public MessageListener listener;
-+ public int account=7,refs; public int id(){return account;} public void incrementJobReferenceCount(String id){refs++;} public void decrementJobReferenceCount(String id){refs--;} public Tdlib settings(){return this;} public boolean isChatHidden(long id){return false;}public Tdlib client(){return this;}public Tdlib listeners(){return this;}
++ public long selfId=999;public long myUserId(){return selfId;}public int account=7,refs; public int id(){return account;} public void incrementJobReferenceCount(String id){refs++;} public void decrementJobReferenceCount(String id){refs--;} public Tdlib settings(){return this;} public boolean isChatHidden(long id){return false;}public Tdlib client(){return this;}public Tdlib listeners(){return this;}
 + public void send(TdApi.Function<?> f,Handler h){sends++;reply=h;}public Handler messageHandler(){return o->cacheUpdates++;}
 + public void subscribeToMessageUpdates(long id,MessageListener l){listener=l;}public void unsubscribeFromMessageUpdates(long id,MessageListener l){if(listener==l)listener=null;}
 +}''',
@@ -4453,7 +4455,7 @@ index 0000000..2df6c95
 +}
 +files.update({
 +'android/widget/Toast.java':'package android.widget; public class Toast {public static final int LENGTH_LONG=1;}',
-+'org/thunderdog/challegram/R.java':'package org.thunderdog.challegram; public class R {public static class string {public static final int SviriFolderBusy=1,SviriFolderLoadFailed=2,SviriFolderCooldown=3,SviriFolderRecipientChanged=4,SviriFolderFinished=5,SviriFolderStopped=6;}}',
++'org/thunderdog/challegram/R.java':'package org.thunderdog.challegram; public class R {public static class string {public static final int SviriFolderBusy=1,SviriFolderLoadFailed=2,SviriFolderCooldown=3,SviriFolderRecipientChanged=4,SviriFolderFinished=5,SviriFolderStopped=6,SviriAccountChanged=7;}}',
 +'org/thunderdog/challegram/core/Lang.java':'package org.thunderdog.challegram.core; public class Lang {public static String getString(int id,Object... args){return "resource:"+id;}}',
 +'TaskTest.java':'''import java.util.*;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;import org.thunderdog.challegram.tool.UI;import org.thunderdog.challegram.unsorted.Settings;
 +public class TaskTest {
@@ -4472,6 +4474,9 @@ index 0000000..2df6c95
 +  check(FolderForwardTask.start(td,one)==null);td.reply.onResult(new TdApi.Error(429,"FLOOD_WAIT_30"));
 +  check(td.refs==0&&UI.timers.isEmpty()&&FolderForwardTask.start(td,one)!=null);
 +  Tdlib other=new Tdlib();other.account=21;check(FolderForwardTask.start(other,one)==null);delivered(other);check(other.refs==0);
++  Tdlib switched=new Tdlib();switched.account=22;
++  check(FolderForwardTask.start(switched,List.of(new FolderForwardTask.Batch(100,List.of(new TdApi.SendMessage())),new FolderForwardTask.Batch(101,List.of(new TdApi.SendMessage()))))==null);
++  delivered(switched);switched.selfId=888;UI.timers.remove(0).run();check(switched.sends==1&&switched.refs==0);
 +  Settings.instance().putLong("sviri_forward_cooldown_20",0);
 +  check(FolderForwardTask.start(td,one)==null);delivered(td);check(td.refs==0);
 +  System.out.println("PASS: detached task survives picker selection disposal, blocks overlapping account queues, cleans references, stops on error and respects cooldown");
@@ -4512,7 +4517,7 @@ index 0000000..2df6c95
 + subprocess.run(['java','-cp',str(temp),'GiftPolicyTest'],check=True)
 diff --git a/tests/sviri/check_gift_flow.py b/tests/sviri/check_gift_flow.py
 new file mode 100644
-index 0000000..ee4c8a3
+index 0000000..3ca51ef
 --- /dev/null
 +++ b/tests/sviri/check_gift_flow.py
 @@ -0,0 +1,67 @@
@@ -4572,7 +4577,7 @@ index 0000000..ee4c8a3
 +flow = (root / 'app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java').read_text()
 +files['org/thunderdog/challegram/ui/SviriGiftFlow.java'] = flow
 +files['org/thunderdog/challegram/util/SenderPickerDelegate.java'] = (root / 'app/src/main/java/org/thunderdog/challegram/util/SenderPickerDelegate.java').read_text()
-+files['org/thunderdog/challegram/telegram/Tdlib.java'] = files['org/thunderdog/challegram/telegram/Tdlib.java'].replace('public Handler reply;', 'public Handler reply;public TdApi.Function<?> lastRequest;').replace('sends++;reply=h;', 'sends++;lastRequest=f;reply=h;').replace('public int account=7,refs;', 'public long myUserId(){return 999;} public Tdlib cache(){return this;} public TdApi.User user(long id){TdApi.User u=new TdApi.User();u.isPremium=true;return u;} public int account=7,refs;')
++files['org/thunderdog/challegram/telegram/Tdlib.java'] = files['org/thunderdog/challegram/telegram/Tdlib.java'].replace('public Handler reply;', 'public Handler reply;public TdApi.Function<?> lastRequest;').replace('sends++;reply=h;', 'sends++;lastRequest=f;reply=h;').replace('public int account=7,refs;', 'public Tdlib cache(){return this;} public TdApi.User user(long id){TdApi.User u=new TdApi.User();u.isPremium=true;return u;} public int account=7,refs;')
 +resources = set(re.findall(r'R.string.(\w+)', flow)) | {'SviriFolderBusy', 'SviriFolderLoadFailed', 'SviriFolderCooldown', 'SviriFolderRecipientChanged', 'SviriFolderFinished', 'SviriFolderStopped'}
 +files['org/thunderdog/challegram/R.java'] = 'package org.thunderdog.challegram;public class R {public static class string {' + ''.join('public static final int ' + name + '=' + str(i) + ';' for i, name in enumerate(sorted(resources))) + '}}'
 +with tempfile.TemporaryDirectory() as tmp:
