@@ -113,6 +113,24 @@ jobs:
           build_exit=$?
           kill "$monitor_pid" 2>/dev/null || true
           exit "$build_exit"
+      - name: Verify separate Test APK identity
+        run: |
+          python3 - <<'PYCODE'
+          import os, re, subprocess
+          from pathlib import Path
+          props = dict(line.split('=', 1) for line in Path('source/version.properties').read_text().splitlines() if '=' in line and not line.lstrip().startswith('#'))
+          aapt = Path(os.environ['ANDROID_HOME']) / 'build-tools' / props['version.build_tools'] / 'aapt'
+          apks = list(Path('source/app/build/outputs/apk').rglob('*.apk'))
+          if not apks:
+              raise SystemExit('No Test APK produced')
+          for apk in apks:
+              info = subprocess.check_output([str(aapt), 'dump', 'badging', str(apk)], text=True)
+              if not re.search(r"^package: name='ua\.swiryyyyx\.client\.test'", info, re.M):
+                  raise SystemExit('Refusing artifact: package is not the separate Test package')
+              if "application-label:'swiryyyyX Test'" not in info:
+                  raise SystemExit('Refusing artifact: Test application label missing')
+              print('Verified separate package ua.swiryyyyx.client.test; label swiryyyyX Test; file', apk.name)
+          PYCODE
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
