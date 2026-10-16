@@ -35,3 +35,11 @@ Gift sheet revision (after build 28):
 Validation: local regression/API payment checks and Java syntax/resources pass; Android CI and device visual checks pending. This is a custom native TGX sheet, not a full port of Telegram Android gifts.
 
 Tab crash hotfix: rebuild metrics on insertion/removal, clamp selection, retain an owned list, recover stale width metrics in onMeasure. Regression executes the real methods for the reported 1244 -> 901 crash, empty lists and 200 tab changes. Included in stable and Test patches.
+
+Regular-gift actions revision:
+- Upgrade through UpgradeGift, with fresh owned gift/price/balance, explicit confirmation, original sender/message checkbox, prepaid upgrade cost zero, and new confirmation if the quote changes.
+- Convert a regular gift through SellGift, using receivedGift.sellStarCount (never the catalog default), an explicit irreversible-operation confirmation, and a fresh conversion-value check before writing.
+- A single account write gate now covers purchase, transfer, listing, upgrade and conversion. No automatic financial retry.
+- Native gift sharing, original sender/recipient/details, collectible supply, and server-provided regular-gift backgrounds.
+- CI now executes core chat, tab mutation, gift purchase/transfer, resale and upgrade/conversion tests before the Android build.
+Local tests pass against the pinned Java API. No real purchase, transfer, conversion, upgrade or listing was executed. Full Telegram feature parity is not claimed: collections, gift messages on sending, TON marketplace/export and advanced craft/auction flows are still pending.

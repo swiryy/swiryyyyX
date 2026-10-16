@@ -1143,9 +1143,40 @@ index 0000000..47a069a
 +      : Lang.getString(R.string.SviriFolderStopped, completed, total, error), Toast.LENGTH_LONG);
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftManagePolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftManagePolicy.java
+new file mode 100644
+index 0000000..1648920
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/GiftManagePolicy.java
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import org.drinkless.tdlib.TdApi;
++
++/** Use the received gift's actual conversion value and server upgrade eligibility. */
++public final class GiftManagePolicy {
++  private GiftManagePolicy() { }
++  private static boolean regular(TdApi.ReceivedGift gift) {
++    return gift != null && gift.receivedGiftId != null && !gift.receivedGiftId.isEmpty()
++      && !gift.wasRefunded && gift.gift instanceof TdApi.SentGiftRegular
++      && ((TdApi.SentGiftRegular)gift.gift).gift != null;
++  }
++  /** -1 is unavailable; prepaid upgrades cost the owner zero Stars. */
++  public static long upgradeCost(TdApi.ReceivedGift gift) {
++    if (!regular(gift) || !gift.canBeUpgraded) return -1;
++    if (gift.prepaidUpgradeStarCount > 0) return 0;
++    long cost = ((TdApi.SentGiftRegular)gift.gift).gift.upgradeStarCount;
++    return cost > 0 ? cost : -1;
++  }
++  /** Never substitute catalog/default values for the owner's actual conversion quote. */
++  public static long conversionValue(TdApi.ReceivedGift gift) {
++    return regular(gift) && gift.sellStarCount > 0 ? gift.sellStarCount : -1;
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java
 new file mode 100644
-index 0000000..02dd166
+index 0000000..df44e01
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java
 @@ -0,0 +1,26 @@
@@ -1161,7 +1192,7 @@ index 0000000..02dd166
 +public final class GiftPaymentTask {
 +  private static final HashSet<Integer> active = new HashSet<>();
 +  public static boolean send (Tdlib tdlib, TdApi.Function<?> request, Consumer<TdApi.Object> callback) {
-+    if (!(request instanceof TdApi.SendGift || request instanceof TdApi.TransferGift || request instanceof TdApi.SetGiftResalePrice)) throw new IllegalArgumentException();
++    if (!(request instanceof TdApi.SendGift || request instanceof TdApi.TransferGift || request instanceof TdApi.SetGiftResalePrice || request instanceof TdApi.UpgradeGift || request instanceof TdApi.SellGift)) throw new IllegalArgumentException();
 +    if (!active.add(tdlib.id())) return false;
 +    tdlib.incrementJobReferenceCount("swir-gift-payment");
 +    final boolean[] finished = {false};
@@ -4355,10 +4386,10 @@ index 0000000..18bcf28
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
 new file mode 100644
-index 0000000..b85e87b
+index 0000000..d8a0186
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,321 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -4388,6 +4419,7 @@ index 0000000..b85e87b
 +import org.thunderdog.challegram.data.TD;
 +import org.thunderdog.challegram.navigation.ViewController;
 +import org.thunderdog.challegram.telegram.GiftResalePolicy;
++import org.thunderdog.challegram.telegram.GiftManagePolicy;
 +import org.thunderdog.challegram.telegram.GiftSendPolicy;
 +import org.thunderdog.challegram.theme.ColorId;
 +import org.thunderdog.challegram.theme.Theme;
@@ -4400,7 +4432,7 @@ index 0000000..b85e87b
 +public final class SviriGiftDetailsController extends ViewController<Void> {
 +  private final ViewController<?> parent;
 +  private final Runnable changed, buy;
-+  private final Consumer<TdApi.ReceivedGift> transfer, sell, removeListing;
++  private final Consumer<TdApi.ReceivedGift> transfer, sell, removeListing, upgrade, convert;
 +  private final long ownerId;
 +  private TdApi.ReceivedGift received;
 +  private PopupLayout popup;
@@ -4413,10 +4445,11 @@ index 0000000..b85e87b
 +
 +  public SviriGiftDetailsController(ViewController<?> parent, TdApi.ReceivedGift gift, Runnable changed,
 +      Consumer<TdApi.ReceivedGift> transfer, Consumer<TdApi.ReceivedGift> sell,
-+      Consumer<TdApi.ReceivedGift> removeListing, Runnable buy) {
++      Consumer<TdApi.ReceivedGift> removeListing, Consumer<TdApi.ReceivedGift> upgrade,
++      Consumer<TdApi.ReceivedGift> convert, Runnable buy) {
 +    super(parent.context(), parent.tdlib());
 +    this.parent = parent; this.received = gift; this.changed = changed;
-+    this.transfer = transfer; this.sell = sell; this.removeListing = removeListing; this.buy = buy;
++    this.upgrade = upgrade; this.convert = convert; this.transfer = transfer; this.sell = sell; this.removeListing = removeListing; this.buy = buy;
 +    ownerId = tdlib.myUserId();
 +  }
 +  @Override public int getId() { return R.id.controller_sviriGiftDetails; }
@@ -4587,6 +4620,11 @@ index 0000000..b85e87b
 +      GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{center,edge});
 +      gradient.setGradientType(GradientDrawable.RADIAL_GRADIENT); gradient.setGradientRadius(Screen.dp(230)); gradient.setGradientCenter(.5f,.27f); gradient.setCornerRadius(Screen.dp(22)); heroPattern.setBackground(gradient);
 +      foreground = 0xff000000 | gift.backdrop.colors.textColor;
++    } else if (regular.background != null) {
++      GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
++        new int[]{0xff000000 | regular.background.centerColor, 0xff000000 | regular.background.edgeColor});
++      gradient.setCornerRadius(Screen.dp(22)); heroPattern.setBackground(gradient);
++      foreground = 0xff000000 | regular.background.textColor;
 +    } else heroPattern.setBackground(shape(Theme.getColor(ColorId.filling), 22));
 +    sticker = new StickerSmallView(context()) { @Override public boolean onTouchEvent(android.view.MotionEvent event) { return false; } };
 +    sticker.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
@@ -4609,12 +4647,25 @@ index 0000000..b85e87b
 +      row(table, R.string.SviriGiftModel, gift.model.name, rarity(gift.model.rarity));
 +      row(table, R.string.SviriGiftBackdrop, gift.backdrop.name, rarity(gift.backdrop.rarity));
 +      row(table, R.string.SviriGiftSymbol, gift.symbol.name, rarity(gift.symbol.rarity));
++      if (gift.totalUpgradedCount > 0) row(table, R.string.SviriGiftSupply,
++        java.text.NumberFormat.getIntegerInstance().format(gift.totalUpgradedCount)
++        + (gift.maxUpgradedCount > 0 ? " / " + java.text.NumberFormat.getIntegerInstance().format(gift.maxUpgradedCount) : ""), "");
 +    }
 +    if (received.date > 0) row(table, R.string.SviriGiftReceivedDate, date(received.date), "");
 +    add(content, table, 12);
 +    if (received.text != null && !received.text.text.isEmpty()) {
 +      TextView message = text(received.text.text, 15, Theme.getColor(ColorId.text)); message.setPadding(Screen.dp(14),Screen.dp(12),Screen.dp(14),Screen.dp(12));
 +      message.setBackground(shape(Theme.getColor(ColorId.filling), 16)); add(content, message, 10);
++    }
++    if (gift != null && gift.originalDetails != null) {
++      TdApi.UpgradedGiftOriginalDetails original = gift.originalDetails;
++      LinearLayout history = column(); history.setBackground(shape(Theme.getColor(ColorId.filling), 16)); history.setClipToOutline(true);
++      if (original.senderId != null) row(history, R.string.SviriGiftOriginalSender, tdlib.senderName(original.senderId), "");
++      if (original.receiverId != null) row(history, R.string.SviriGiftOriginalReceiver, tdlib.senderName(original.receiverId), "");
++      if (original.date > 0) row(history, R.string.SviriGiftReceivedDate, date(original.date), "");
++      if (history.getChildCount() > 0) add(content, history, 10);
++      if (original.text != null && !original.text.text.isEmpty()
++          && (received.text == null || !original.text.text.equals(received.text.text))) note(original.text.text);
 +    }
 +    long now = System.currentTimeMillis() / 1000L;
 +    boolean canTransfer = GiftSendPolicy.transferable(received, (int)now), canSell = GiftResalePolicy.eligible(received, now);
@@ -4625,13 +4676,26 @@ index 0000000..b85e87b
 +      action(actions, R.string.SviriGiftTransferShort, R.drawable.baseline_share_24, canTransfer, () -> leave(() -> transfer.accept(received)));
 +      action(actions, R.string.SviriGiftSellShort, R.drawable.baseline_star_24, canSell, () -> leave(() -> sell.accept(received)));
 +    }
++    if (regular != null) {
++      if (GiftManagePolicy.upgradeCost(received) >= 0) action(actions, R.string.SviriGiftUpgradeShort,
++        R.drawable.baseline_star_24, true, () -> leave(() -> upgrade.accept(received)));
++      if (GiftManagePolicy.conversionValue(received) >= 0) action(actions, R.string.SviriGiftConvertShort,
++        R.drawable.baseline_star_24, true, () -> leave(() -> convert.accept(received)));
++    }
 +    add(content, actions, 12);
 +    if (received.wasRefunded) note(Lang.getString(R.string.SviriGiftUnavailable));
 +    else if (gift != null && !canTransfer && received.nextTransferDate > now) note(Lang.getString(R.string.SviriGiftTransferAfter, date(received.nextTransferDate)));
 +    if (gift != null && !canSell && received.nextResaleDate > now) note(Lang.getString(R.string.SviriGiftSaleAfter, date(received.nextResaleDate)));
 +    if (gift != null && canTransfer && received.transferStarCount > 0) note(Lang.getString(R.string.SviriGiftTransferFee) + ": " + received.transferStarCount + " ★");
 +    if (gift != null && gift.resaleParameters != null) linkAction(R.string.SviriGiftRemoveListing, () -> leave(() -> removeListing.accept(received)));
-+    if (gift != null && gift.name != null && !gift.name.isEmpty()) linkAction(R.string.CopyLink, () -> UI.copyText("https://t.me/nft/" + gift.name, R.string.CopiedLink));
++    if (gift != null && gift.name != null && !gift.name.isEmpty()) {
++      final String link = "https://t.me/nft/" + gift.name;
++      linkAction(R.string.Share, () -> leave(() -> {
++        ShareController share = new ShareController(parent.context(), tdlib);
++        share.setArguments(new ShareController.Args(link)); share.show();
++      }));
++      linkAction(R.string.CopyLink, () -> UI.copyText(link, R.string.CopiedLink));
++    }
 +    linkAction(R.string.SviriGiftBuy, () -> leave(buy));
 +    if (content.isAttachedToWindow()) sticker.attach();
 +  }
@@ -4812,6 +4876,127 @@ index 0000000..ffda35a
 +      } else toast(error(result) + "\n" + Lang.getString(R.string.SviriGiftCheckBeforeRetry));
 +    })) { writing = false; fail(Lang.getString(R.string.SviriGiftBusy)); }
 +    else toast(Lang.getString(R.string.SviriGiftSending));
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftManageFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftManageFlow.java
+new file mode 100644
+index 0000000..429d487
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftManageFlow.java
+@@ -0,0 +1,115 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.app.AlertDialog;
++import android.widget.CheckBox;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import android.widget.Toast;
++import java.util.function.Consumer;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.navigation.ViewController;
++import org.thunderdog.challegram.telegram.GiftManagePolicy;
++import org.thunderdog.challegram.telegram.GiftPaymentTask;
++import org.thunderdog.challegram.telegram.GiftSendPolicy;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.tool.Screen;
++import org.thunderdog.challegram.tool.UI;
++
++/** Explicitly quoted regular-gift upgrade/conversion. No write is retried automatically. */
++final class SviriGiftManageFlow {
++  private final ViewController<?> owner;
++  private final Tdlib tdlib;
++  private final Runnable changed;
++  private final long userId;
++  private boolean busy, closed, writing, upgrade, keepDetails = true;
++  private int generation;
++  private String receivedId;
++  private AlertDialog dialog;
++  SviriGiftManageFlow(ViewController<?> owner, Tdlib tdlib, Runnable changed) {
++    this.owner = owner; this.tdlib = tdlib; this.changed = changed; userId = tdlib.myUserId();
++  }
++  private boolean current() { return !closed && userId == tdlib.myUserId(); }
++  void destroy() { closed = true; generation++; if (dialog != null) dialog.dismiss(); }
++  private void toast(String value) { UI.showToast(value, Toast.LENGTH_LONG); }
++  private void cancel() { if (!writing) { busy = false; generation++; } }
++  private void fail(TdApi.Object result) {
++    busy = false; generation++;
++    if (current()) toast(result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriGiftReadFailed));
++  }
++  private void read(TdApi.Function<?> request, Consumer<TdApi.Object> callback) {
++    final int token = generation;
++    Runnable timeout = () -> { if (current() && token == generation) fail(null); };
++    UI.post(timeout, 30000L);
++    tdlib.client().send(request, result -> UI.post(() -> {
++      UI.removePendingRunnable(timeout);
++      if (current() && token == generation) callback.accept(result);
++    }));
++  }
++  void start(TdApi.ReceivedGift gift, boolean upgrade) {
++    if (!current() || busy || gift == null || gift.receivedGiftId == null || gift.receivedGiftId.isEmpty()) return;
++    this.upgrade = upgrade; this.receivedId = gift.receivedGiftId;
++    keepDetails = true; busy = true; generation++; inspect(null);
++  }
++  private static final class Quote {
++    final long giftId, price;
++    final String title;
++    Quote(long giftId, long price, String title) { this.giftId = giftId; this.price = price; this.title = title; }
++  }
++  private void inspect(Quote approved) {
++    read(new TdApi.GetReceivedGift(receivedId), result -> {
++      if (!(result instanceof TdApi.ReceivedGift)) { fail(result); return; }
++      TdApi.ReceivedGift fresh = (TdApi.ReceivedGift)result;
++      long price = upgrade ? GiftManagePolicy.upgradeCost(fresh) : GiftManagePolicy.conversionValue(fresh);
++      if (!receivedId.equals(fresh.receivedGiftId) || price < 0) { fail(new TdApi.Error(400, Lang.getString(R.string.SviriGiftUnavailable))); return; }
++      long giftId = ((TdApi.SentGiftRegular)fresh.gift).gift.id;
++      TdApi.Sticker sticker = ((TdApi.SentGiftRegular)fresh.gift).gift.sticker;
++      Quote quote = new Quote(giftId, price, (sticker != null && sticker.emoji != null ? sticker.emoji + " · " : "") + Lang.getString(R.string.SviriReceivedGift));
++      Runnable ready = () -> {
++        if (approved != null && approved.giftId == giftId && approved.price == price) { write(price); return; }
++        if (approved != null) toast(Lang.getString(R.string.SviriGiftPriceChanged));
++        confirm(quote);
++      };
++      if (upgrade && price > 0) read(new TdApi.GetStarTransactions(new TdApi.MessageSenderUser(userId), "", null, "", 1), balance -> {
++        if (!(balance instanceof TdApi.StarTransactions)) { fail(balance); return; }
++        if (!GiftSendPolicy.enoughStars(((TdApi.StarTransactions)balance).starAmount, price)) {
++          fail(new TdApi.Error(400, Lang.getString(R.string.SviriGiftInsufficient, price))); return;
++        }
++        ready.run();
++      }); else ready.run();
++    });
++  }
++  private void confirm(Quote quote) {
++    LinearLayout content = new LinearLayout(owner.context()); content.setOrientation(LinearLayout.VERTICAL);
++    TextView info = new TextView(owner.context());
++    info.setPadding(Screen.dp(24), Screen.dp(12), Screen.dp(24), Screen.dp(12));
++    info.setText(quote.title + "\n\n" + (upgrade
++      ? Lang.getString(R.string.SviriGiftUpgradeInfo, quote.price)
++      : Lang.getString(R.string.SviriGiftConvertInfo, quote.price))); content.addView(info);
++    CheckBox keep = new CheckBox(owner.context()); keep.setText(R.string.SviriGiftKeepDetails); keep.setChecked(keepDetails);
++    if (upgrade) content.addView(keep);
++    final boolean[] used = {false};
++    dialog = new AlertDialog.Builder(owner.context()).setTitle(upgrade ? R.string.SviriGiftUpgradeShort : R.string.SviriGiftConvertShort)
++      .setView(content).setNegativeButton(R.string.Cancel, (d,w) -> cancel())
++      .setPositiveButton(Lang.getString(upgrade ? R.string.SviriGiftUpgradeConfirm : R.string.SviriGiftConvertConfirm, quote.price), (d,w) -> {
++        if (!current() || used[0] || writing) return;
++        used[0] = true; keepDetails = keep.isChecked(); inspect(quote);
++      }).create();
++    dialog.setOnCancelListener(d -> cancel()); dialog.show();
++  }
++  private void write(long price) {
++    if (!current() || writing) return;
++    writing = true;
++    TdApi.Function<?> request = upgrade ? new TdApi.UpgradeGift("", receivedId, keepDetails, price) : new TdApi.SellGift("", receivedId);
++    if (!GiftPaymentTask.send(tdlib, request, result -> {
++      writing = false; busy = false; generation++;
++      if (!current()) return;
++      boolean success = upgrade ? result instanceof TdApi.UpgradeGiftResult : result instanceof TdApi.Ok;
++      if (success) { toast(Lang.getString(upgrade ? R.string.SviriGiftUpgraded : R.string.SviriGiftConverted)); changed.run(); }
++      else toast((result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse)) + "\n" + Lang.getString(R.string.SviriGiftCheckBeforeRetry));
++    })) { writing = false; fail(new TdApi.Error(400, Lang.getString(R.string.SviriGiftBusy))); }
 +  }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
@@ -4999,10 +5184,10 @@ index 0000000..f638b1a
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
-index 0000000..c0f1d7a
+index 0000000..f6409a7
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,335 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -5051,6 +5236,7 @@ index 0000000..c0f1d7a
 +  private SviriGiftDetailsController giftSheet;
 +  private SviriGiftFlow giftFlow;
 +  private SviriGiftResaleFlow resaleFlow;
++  private SviriGiftManageFlow manageFlow;
 +  private final Consumer<TdApi.StarAmount> balanceListener = value -> {
 +    if (!isDestroyed() && adapter != null) adapter.notifyItemChanged(0);
 +  };
@@ -5170,8 +5356,9 @@ index 0000000..c0f1d7a
 +    if (giftSheet != null && !giftSheet.isDestroyed()) return;
 +    if (giftFlow == null) giftFlow = new SviriGiftFlow(this, tdlib, this::refreshGifts);
 +    if (resaleFlow == null) resaleFlow = new SviriGiftResaleFlow(this, tdlib, this::refreshGifts);
++    if (manageFlow == null) manageFlow = new SviriGiftManageFlow(this, tdlib, this::refreshGifts);
 +    giftSheet = new SviriGiftDetailsController(this, received, this::refreshGifts,
-+      giftFlow::transfer, gift -> resaleFlow.start(gift, false), gift -> resaleFlow.start(gift, true),
++      giftFlow::transfer, gift -> resaleFlow.start(gift, false), gift -> resaleFlow.start(gift, true), gift -> manageFlow.start(gift, true), gift -> manageFlow.start(gift, false),
 +      () -> navigateTo(new SviriGiftCatalogController(context(), tdlib)));
 +    giftSheet.show();
 +  }
@@ -5226,8 +5413,9 @@ index 0000000..c0f1d7a
 +        panel.setGift(tdlib, null);
 +        TdApi.Gift gift = ((TdApi.SentGiftRegular) received.gift).gift;
 +        image = gift.sticker; title.setText(Lang.getString(R.string.SviriReceivedGift));
-+        start = Theme.getColor(ColorId.background);
-+        end = Theme.getColor(ColorId.filling);
++        start = gift.background != null ? 0xff000000 | gift.background.centerColor : Theme.getColor(ColorId.background);
++        end = gift.background != null ? 0xff000000 | gift.background.edgeColor : Theme.getColor(ColorId.filling);
++        if (gift.background != null) foreground = 0xff000000 | gift.background.textColor;
 +        subtitle.setText(gift.starCount + " ★");
 +      }
 +      GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{start, end});
@@ -5327,6 +5515,7 @@ index 0000000..c0f1d7a
 +    if (giftSheet != null) { giftSheet.dismiss(); giftSheet.destroy(); }
 +    if (giftFlow != null) giftFlow.destroy();
 +    if (resaleFlow != null) resaleFlow.destroy();
++    if (manageFlow != null) manageFlow.destroy();
 +    tdlib.removeStarAmountListener(balanceListener);
 +    for (Card card : cards) { card.sticker.performDestroy(); card.panel.destroyPattern(); }
 +    for (AvatarView avatar : avatars) avatar.performDestroy();
@@ -5670,7 +5859,7 @@ index 98ed3d2..c28515f 100644
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..65f2766 100644
+index 416f9af..5985223 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -5689,7 +5878,7 @@ index 416f9af..65f2766 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,101 @@
+@@ -5909,4 +5919,111 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -5790,6 +5979,16 @@ index 416f9af..65f2766 100644
 +  <string name="SviriGiftTransferAfter">Transfer available after %1$s</string>
 +  <string name="SviriGiftSaleAfter">Sale available after %1$s</string>
 +  <string name="SviriGiftClose">Close</string>
++  <string name="SviriGiftUpgradeShort">Upgrade</string>
++  <string name="SviriGiftConvertShort">Convert to Stars</string>
++  <string name="SviriGiftKeepDetails">Keep the original sender and message</string>
++  <string name="SviriGiftUpgradeInfo">Upgrade this gift to a collectible for %1$d Stars. Its model, backdrop and symbol will be assigned by Telegram. A prepaid upgrade costs you 0 Stars.</string>
++  <string name="SviriGiftConvertInfo">Convert this gift into %1$d Stars? The gift will be removed. You cannot undo this conversion.</string>
++  <string name="SviriGiftUpgradeConfirm">Upgrade · %1$d ★</string>
++  <string name="SviriGiftConvertConfirm">Convert · +%1$d ★</string>
++  <string name="SviriGiftSupply">Issued</string>
++  <string name="SviriGiftOriginalSender">Original sender</string>
++  <string name="SviriGiftOriginalReceiver">Original recipient</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
@@ -6325,6 +6524,53 @@ index 0000000..3ca51ef
 +        path.write_text(content)
 +    subprocess.run(['java', '-Xmx1g', 'com.sun.tools.javac.Main', '-d', str(temp), *[str(temp / name) for name in files]], check=True)
 +    subprocess.run(['java', '-cp', str(temp), 'org.thunderdog.challegram.ui.GiftFlowTest'], check=True)
+diff --git a/tests/sviri/check_gift_manage.py b/tests/sviri/check_gift_manage.py
+new file mode 100644
+index 0000000..e681f36
+--- /dev/null
++++ b/tests/sviri/check_gift_manage.py
+@@ -0,0 +1,41 @@
++"""Compile and exercise the actual upgrade/conversion flow against the pinned generated API."""
++from pathlib import Path
++import runpy,tempfile,subprocess,sys,re
++root=Path(__file__).resolve().parents[2]
++sys.argv=['check',str(Path(sys.argv[1]) if len(sys.argv)>1 else root/'tdlib/src/main/java/org/drinkless/tdlib/TdApi.java')]
++base=runpy.run_path(str(root/'tests/sviri/check_gift_flow.py'));files=dict(base['files'])
++files['android/widget/CheckBox.java']='''package android.widget;import android.content.Context;public class CheckBox{public static CheckBox last;boolean checked;public CheckBox(Context c){last=this;}public void setText(int t){}public void setChecked(boolean v){checked=v;}public boolean isChecked(){return checked;}}'''
++files['org/thunderdog/challegram/ui/GiftManageTest.java']='''package org.thunderdog.challegram.ui;
++import android.app.AlertDialog;import android.widget.CheckBox;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;import org.thunderdog.challegram.navigation.ViewController;
++public class GiftManageTest {
++static void check(boolean b){if(!b)throw new AssertionError();}
++static TdApi.ReceivedGift gift(long upgrade,long convert,boolean prepaid){TdApi.ReceivedGift g=new TdApi.ReceivedGift();g.receivedGiftId="mine";g.canBeUpgraded=true;g.sellStarCount=convert;g.prepaidUpgradeStarCount=prepaid?upgrade:0;TdApi.Gift r=new TdApi.Gift();r.id=77;r.upgradeStarCount=upgrade;r.starCount=100;r.defaultSellStarCount=99;g.gift=new TdApi.SentGiftRegular(r);return g;}
++static void fresh(Tdlib t,TdApi.ReceivedGift g){check(t.lastRequest instanceof TdApi.GetReceivedGift);t.reply.onResult(g);}
++static void balance(Tdlib t,long n){check(t.lastRequest instanceof TdApi.GetStarTransactions);TdApi.StarTransactions b=new TdApi.StarTransactions();b.starAmount=new TdApi.StarAmount(n,0);t.reply.onResult(b);}
++public static void main(String[] args){
++check(GiftManagePolicy.upgradeCost(gift(30,15,false))==30);check(GiftManagePolicy.upgradeCost(gift(30,15,true))==0);check(GiftManagePolicy.conversionValue(gift(30,15,false))==15);
++var unavailable=gift(30,0,false);check(GiftManagePolicy.conversionValue(unavailable)==-1);unavailable.wasRefunded=true;check(GiftManagePolicy.upgradeCost(unavailable)==-1);unavailable=gift(30,10,false);unavailable.canBeUpgraded=false;check(GiftManagePolicy.upgradeCost(unavailable)==-1);
++Tdlib t=new Tdlib();t.account=91;int[] changed={0};var flow=new SviriGiftManageFlow(new ViewController<>(),t,()->changed[0]++);
++flow.start(gift(30,15,false),true);fresh(t,gift(30,15,false));balance(t,100);CheckBox.last.setChecked(false);var confirm=AlertDialog.last;confirm.confirm();var pending=t.lastRequest;confirm.confirm();check(t.lastRequest==pending);
++fresh(t,gift(40,15,false));balance(t,100);check(!(t.lastRequest instanceof TdApi.UpgradeGift));AlertDialog.last.confirm();fresh(t,gift(40,15,false));balance(t,100);check(t.lastRequest instanceof TdApi.UpgradeGift);var up=(TdApi.UpgradeGift)t.lastRequest;check(up.receivedGiftId.equals("mine")&&up.businessConnectionId.isEmpty()&&up.starCount==40&&!up.keepOriginalDetails);var cb=t.reply;cb.onResult(new TdApi.UpgradeGiftResult());cb.onResult(new TdApi.UpgradeGiftResult());check(changed[0]==1&&t.refs==0);
++flow.start(gift(30,15,true),true);fresh(t,gift(30,15,true));AlertDialog.last.confirm();fresh(t,gift(30,15,true));check(t.lastRequest instanceof TdApi.UpgradeGift&&((TdApi.UpgradeGift)t.lastRequest).starCount==0);t.reply.onResult(new TdApi.UpgradeGiftResult());check(changed[0]==2);
++flow.start(gift(30,15,false),false);fresh(t,gift(30,15,false));AlertDialog.last.confirm();fresh(t,gift(30,20,false));check(!(t.lastRequest instanceof TdApi.SellGift));AlertDialog.last.confirm();fresh(t,gift(30,20,false));check(t.lastRequest instanceof TdApi.SellGift&&((TdApi.SellGift)t.lastRequest).receivedGiftId.equals("mine"));t.reply.onResult(new TdApi.Ok());check(changed[0]==3&&t.refs==0);
++flow.start(gift(30,15,false),true);fresh(t,gift(30,15,false));balance(t,0);check(!(t.lastRequest instanceof TdApi.UpgradeGift));
++flow.start(gift(30,15,false),false);fresh(t,gift(30,15,false));AlertDialog.last.cancel.onCancel(AlertDialog.last);check(!(t.lastRequest instanceof TdApi.SellGift));
++flow.start(gift(30,15,false),false);flow.destroy();fresh(t,gift(30,15,false));check(!(t.lastRequest instanceof TdApi.SellGift));
++Tdlib switched=new Tdlib();switched.account=92;var other=new SviriGiftManageFlow(new ViewController<>(),switched,()->changed[0]++);other.start(gift(30,15,false),false);fresh(switched,gift(30,15,false));other.destroy();AlertDialog.last.confirm();check(!(switched.lastRequest instanceof TdApi.SellGift));
++Tdlib switchedAccount=new Tdlib();switchedAccount.account=93;var switchedFlow=new SviriGiftManageFlow(new ViewController<>(),switchedAccount,()->changed[0]++);switchedFlow.start(gift(30,15,false),false);fresh(switchedAccount,gift(30,15,false));switchedAccount.selfId++;AlertDialog.last.confirm();check(!(switchedAccount.lastRequest instanceof TdApi.SellGift));
++Tdlib pendingTd=new Tdlib();pendingTd.account=94;var pendingFlow=new SviriGiftManageFlow(new ViewController<>(),pendingTd,()->changed[0]++);pendingFlow.start(gift(30,15,false),false);fresh(pendingTd,gift(30,15,false));AlertDialog.last.confirm();fresh(pendingTd,gift(30,15,false));check(pendingTd.lastRequest instanceof TdApi.SellGift);check(!GiftPaymentTask.send(pendingTd,new TdApi.UpgradeGift(),v->{}));int sends=pendingTd.sends;pendingFlow.destroy();pendingTd.reply.onResult(new TdApi.Error(500,"NETWORK"));check(pendingTd.refs==0&&pendingTd.sends==sends);
++System.out.println("PASS: actual upgrade/conversion flows: fresh price reconfirmation, prepaid zero cost, original-detail choice, exact conversion value, duplicate/cancel/destroy guards, insufficient balance, one write and reference cleanup");}}
++'''
++flow=(root/'app/src/main/java/org/thunderdog/challegram/ui/SviriGiftManageFlow.java').read_text()
++files['org/thunderdog/challegram/ui/SviriGiftManageFlow.java']=flow
++files['org/thunderdog/challegram/telegram/GiftManagePolicy.java']=(root/'app/src/main/java/org/thunderdog/challegram/telegram/GiftManagePolicy.java').read_text()
++resources=set(re.findall(r'R.string.(\w+)',flow))|set(re.findall(r'R.string.(\w+)',base['flow']))|{'SviriFolderBusy','SviriFolderLoadFailed','SviriFolderCooldown','SviriFolderRecipientChanged','SviriFolderFinished','SviriFolderStopped'}
++files['org/thunderdog/challegram/R.java']='package org.thunderdog.challegram;public class R{public static class string{'+''.join('public static final int '+n+'='+str(i)+';' for i,n in enumerate(sorted(resources)))+'}}'
++with tempfile.TemporaryDirectory() as tmp:
++ p=Path(tmp)
++ for name,content in files.items():
++  f=p/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(content)
++ subprocess.run(['java','-Xmx1g','com.sun.tools.javac.Main','-d',tmp,*[str(p/n) for n in files]],check=True)
++ subprocess.run(['java','-cp',tmp,'org.thunderdog.challegram.ui.GiftManageTest'],check=True)
 diff --git a/tests/sviri/check_gift_resale.py b/tests/sviri/check_gift_resale.py
 new file mode 100644
 index 0000000..e86a4de
