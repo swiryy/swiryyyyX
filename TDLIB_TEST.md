@@ -13,3 +13,7 @@ Existing hidden chats, fixed folder order, single-chat archive, 200 ms folder fo
 Local checks: 400-chat stores/load/queue, 200-chat fixed slice order; sender, task and gift purchase/transfer code compile against the new generated TDLib API; resale price overflow, bounds, cooldown and write serialization. Java syntax/XML checks pass. Android build and phone validation pending. No real gift purchases, transfers or listings were made.
 
 Manual test: cold start/login, main folders and locked order, one-chat archive, hidden chats/counters, forwarding preview and delivery, received gifts and symbol patterns, transfer recipient/fee confirmation, sale price validation/cancel, listing readback. Do not clear app data to work around a signing mismatch.
+
+Build 25 failed in vkryl/td Kotlin helpers. Follow-up aligns tdlib-utils with upstream 61d4ea0b66cfdeed9352ba0a84e5746e528559d5 and adds the three upstream TON comparison types to the generator configuration. The generator retains the existing annotation API. No app feature is removed. Android compilation still pending.
+
+Also ports upstream API handling in 17 app Java files for new TON content/entity/update types. All 219 generated compile guards referenced by the app now match the selected bundle/utility definitions. New TON content uses upstream unsupported-message fallback; this is not a TON wallet implementation.
