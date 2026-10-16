@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: swiryyyyX-apk
+  group: swiryyyyX-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -55,9 +55,12 @@ jobs:
           git -C source fetch --depth=1 origin "$(cat UPSTREAM_COMMIT)"
           git -C source checkout --detach FETCH_HEAD
           git -C source apply --check "$GITHUB_WORKSPACE/swiryyyyX.patch"
-          git -C source apply "$GITHUB_WORKSPACE/swiryyyyX.patch"
+          git -C source apply --index "$GITHUB_WORKSPACE/swiryyyyX.patch"
           git -C source submodule update --init --recursive --depth=1 --jobs 4
           git -C source/tdlib lfs pull
+          test "$(git -C source/tdlib rev-parse HEAD)" = "1094df0caf4e5b59f6b247f8d9eb8896022cb379"
+          test "$(head -n 1 source/tdlib/version.txt)" = "c15d3f5a5de6e3ba5839822c451152e5e18bb700"
+          echo "TDLib bundle 1094df0; source c15d3f5; NDK 30.0.16248370"
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -113,7 +116,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: swiryyyyX-arm64-debug
+          name: swiryyyyX-tdlib-test-arm64-debug
           path: source/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 7
