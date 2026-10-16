@@ -4267,95 +4267,176 @@ index 0000000..18bcf28
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
 new file mode 100644
-index 0000000..a034860
+index 0000000..b85e87b
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,288 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
 +import android.content.Context;
++import android.content.res.ColorStateList;
 +import android.graphics.Typeface;
 +import android.graphics.drawable.GradientDrawable;
++import android.graphics.drawable.RippleDrawable;
 +import android.view.Gravity;
 +import android.view.View;
 +import android.view.ViewGroup;
++import android.widget.FrameLayout;
 +import android.widget.LinearLayout;
++import android.widget.ScrollView;
 +import android.widget.TextView;
 +import android.widget.Toast;
-+import androidx.recyclerview.widget.LinearLayoutManager;
-+import androidx.recyclerview.widget.RecyclerView;
++import androidx.core.widget.TextViewCompat;
++import java.text.DateFormat;
++import java.util.Date;
++import java.util.Locale;
++import java.util.function.Consumer;
 +import org.drinkless.tdlib.TdApi;
 +import org.thunderdog.challegram.R;
 +import org.thunderdog.challegram.component.sticker.StickerSmallView;
 +import org.thunderdog.challegram.component.sticker.TGStickerObj;
 +import org.thunderdog.challegram.core.Lang;
 +import org.thunderdog.challegram.data.TD;
-+import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.navigation.ViewController;
++import org.thunderdog.challegram.telegram.GiftResalePolicy;
 +import org.thunderdog.challegram.telegram.GiftSendPolicy;
 +import org.thunderdog.challegram.theme.ColorId;
 +import org.thunderdog.challegram.theme.Theme;
 +import org.thunderdog.challegram.tool.Screen;
 +import org.thunderdog.challegram.tool.UI;
-+import org.thunderdog.challegram.v.CustomRecyclerView;
-+import java.util.Locale;
++import org.thunderdog.challegram.widget.PopupLayout;
++import me.vkryl.android.widget.FrameLayoutFix;
 +
-+/** Native gift detail page; animation runs only on the opened gift. */
-+public final class SviriGiftDetailsController extends RecyclerViewController<Void> {
-+  private TdApi.ReceivedGift received;
-+  private final Runnable changed;
++/** A dismissible gift sheet. Payment flows belong to the profile, not the popup. */
++public final class SviriGiftDetailsController extends ViewController<Void> {
++  private final ViewController<?> parent;
++  private final Runnable changed, buy;
++  private final Consumer<TdApi.ReceivedGift> transfer, sell, removeListing;
 +  private final long ownerId;
-+  private SviriGiftFlow flow;
-+  private SviriGiftResaleFlow resale;
-+  private DetailsAdapter adapter;
++  private TdApi.ReceivedGift received;
++  private PopupLayout popup;
++  private LinearLayout content;
 +  private StickerSmallView sticker;
 +  private SviriGiftPatternLayout heroPattern;
 +  private boolean saving, reading;
-+  public SviriGiftDetailsController(Context context, Tdlib tdlib, TdApi.ReceivedGift gift, Runnable changed) {
-+    super(context, tdlib); this.received = gift; this.changed = changed; this.ownerId = tdlib.myUserId();
++  private int savedRevision;
++  private Runnable readTimeout;
++
++  public SviriGiftDetailsController(ViewController<?> parent, TdApi.ReceivedGift gift, Runnable changed,
++      Consumer<TdApi.ReceivedGift> transfer, Consumer<TdApi.ReceivedGift> sell,
++      Consumer<TdApi.ReceivedGift> removeListing, Runnable buy) {
++    super(parent.context(), parent.tdlib());
++    this.parent = parent; this.received = gift; this.changed = changed;
++    this.transfer = transfer; this.sell = sell; this.removeListing = removeListing; this.buy = buy;
++    ownerId = tdlib.myUserId();
 +  }
 +  @Override public int getId() { return R.id.controller_sviriGiftDetails; }
 +  @Override public CharSequence getName() { return Lang.getString(R.string.SviriGiftDetails); }
-+  @Override protected void onCreateView(Context context, CustomRecyclerView recycler) {
-+    flow = new SviriGiftFlow(this, tdlib, () -> { changed.run(); refresh(); });
-+    resale = new SviriGiftResaleFlow(this, tdlib, () -> { changed.run(); refresh(); });
-+    recycler.setLayoutManager(new LinearLayoutManager(context)); recycler.setItemAnimator(null);
-+    recycler.setPadding(Screen.dp(16), Screen.dp(12), Screen.dp(16), Screen.dp(24));
-+    adapter = new DetailsAdapter(); recycler.setAdapter(adapter); refresh();
++
++  public void show() {
++    if (!current() || popup != null) return;
++    popup = new PopupLayout(context());
++    popup.init(true); popup.setNeedRootInsets(); popup.setHideKeyboard(); popup.setBoundController(this);
++    int height = Math.min(Screen.dp(720), Math.max(Screen.dp(240), Screen.currentHeight() - Screen.dp(64)));
++    View sheet = getValue();
++    sheet.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, height, Gravity.BOTTOM));
++    popup.showSimplePopupView(sheet, height);
++    refresh();
 +  }
-+  private boolean current() { return !isDestroyed() && ownerId == tdlib.myUserId(); }
++  public void dismiss() { if (popup != null && !popup.isWindowHidden()) popup.hideWindow(true); }
++  private boolean current() { return !isDestroyed() && !parent.isDestroyed() && ownerId == tdlib.myUserId(); }
++  private void leave(Runnable action) {
++    if (!current()) return;
++    // Destroy the popup before opening navigation. The profile owns the payment flow.
++    if (popup != null) popup.hideWindow(false);
++    if (!parent.isDestroyed() && ownerId == tdlib.myUserId()) action.run();
++  }
++  private GradientDrawable shape(int color, int radius) {
++    GradientDrawable result = new GradientDrawable(); result.setColor(color); result.setCornerRadius(Screen.dp(radius)); return result;
++  }
++  private void clickable(View view, int color, int radius, Runnable action) {
++    GradientDrawable background = shape(color, radius);
++    view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x22ffffff), background, shape(0xffffffff, radius)));
++    view.setOnClickListener(v -> { if (current()) action.run(); });
++  }
++  private TextView text(CharSequence value, int size, int color) {
++    TextView result = new TextView(context()); result.setText(value); result.setTextSize(size);
++    result.setTextColor(color); result.setGravity(Gravity.CENTER_VERTICAL); result.setIncludeFontPadding(false);
++    return result;
++  }
++  private LinearLayout column() { LinearLayout result = new LinearLayout(context()); result.setOrientation(LinearLayout.VERTICAL); return result; }
++  private void add(LinearLayout group, View view, int top) {
++    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++    params.topMargin = Screen.dp(top); group.addView(view, params);
++  }
++  @Override protected View onCreateView(Context context) {
++    FrameLayoutFix sheet = new FrameLayoutFix(context);
++    GradientDrawable background = shape(Theme.getColor(ColorId.background), 28);
++    background.setCornerRadii(new float[]{Screen.dp(28),Screen.dp(28),Screen.dp(28),Screen.dp(28),0,0,0,0});
++    sheet.setBackground(background); sheet.setClipToOutline(true);
++    View handle = new View(context); handle.setBackground(shape(0x44888888, 3));
++    FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(Screen.dp(36), Screen.dp(4), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
++    hp.topMargin = Screen.dp(9); sheet.addView(handle, hp);
++    TextView close = text("", 16, Theme.getColor(ColorId.textLight));
++    close.setCompoundDrawablesWithIntrinsicBounds(R.drawable.baseline_close_24, 0, 0, 0);
++    TextViewCompat.setCompoundDrawableTintList(close, ColorStateList.valueOf(Theme.getColor(ColorId.textLight)));
++    close.setPadding(Screen.dp(10), Screen.dp(10), Screen.dp(10), Screen.dp(10));
++    close.setContentDescription(Lang.getString(R.string.SviriGiftClose));
++    clickable(close, Theme.getColor(ColorId.filling), 22, this::dismiss);
++    FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(Screen.dp(44), Screen.dp(44), Gravity.TOP | Gravity.END);
++    cp.topMargin = Screen.dp(20); cp.rightMargin = Screen.dp(12);
++
++    ScrollView scroll = new ScrollView(context); scroll.setFillViewport(false); scroll.setClipToPadding(false);
++    scroll.setVerticalScrollBarEnabled(false);
++    content = column(); content.setPadding(Screen.dp(16), Screen.dp(6), Screen.dp(16), Screen.dp(16));
++    scroll.addView(content, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++    FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
++    sp.topMargin = Screen.dp(24); sp.bottomMargin = Screen.dp(76); sheet.addView(scroll, sp);
++    sheet.addView(close, cp);
++    LinearLayout footer = column(); footer.setPadding(Screen.dp(16), Screen.dp(10), Screen.dp(16), Screen.dp(14));
++    footer.setBackgroundColor(Theme.getColor(ColorId.background));
++    TextView done = text(Lang.getString(R.string.Done), 16, 0xffffffff); done.setGravity(Gravity.CENTER); done.setTypeface(null, Typeface.BOLD);
++    clickable(done, Theme.getColor(ColorId.textLink), 14, this::dismiss);
++    footer.addView(done, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(50)));
++    sheet.addView(footer, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(76), Gravity.BOTTOM));
++    render(); return sheet;
++  }
 +  private void refresh() {
 +    if (!current() || reading || received.receivedGiftId == null || received.receivedGiftId.isEmpty()) return;
 +    reading = true;
-+    tdlib.client().send(new TdApi.GetReceivedGift(received.receivedGiftId), result -> runOnUiThreadOptional(() -> {
-+      reading = false; if (!current()) return;
-+      if (result instanceof TdApi.ReceivedGift) { received = (TdApi.ReceivedGift) result; adapter.notifyItemChanged(0); }
-+      else if (result instanceof TdApi.Error) UI.showToast(TD.toErrorString(result), Toast.LENGTH_SHORT);
++    final int revision = savedRevision;
++    readTimeout = () -> { if (current() && reading) { reading = false; toast(Lang.getString(R.string.SviriGiftReadFailed)); } };
++    final Runnable timeout = readTimeout; UI.post(timeout, 30000L);
++    tdlib.client().send(new TdApi.GetReceivedGift(received.receivedGiftId), result -> UI.post(() -> {
++      UI.removePendingRunnable(timeout);
++      if (!current() || !reading || readTimeout != timeout) return;
++      reading = false;
++      if (result instanceof TdApi.ReceivedGift) {
++        if (revision == savedRevision && !saving) received = (TdApi.ReceivedGift) result;
++        render();
++      }
++      else if (result instanceof TdApi.Error) toast(TD.toErrorString(result));
 +    }));
 +  }
++  private void toast(String value) { UI.showToast(value, Toast.LENGTH_SHORT); }
 +  private void toggleSaved() {
-+    if (!current() || saving || received.receivedGiftId == null || received.receivedGiftId.isEmpty()) return;
-+    saving = true;
++    if (!current() || saving || received.wasRefunded || received.receivedGiftId == null || received.receivedGiftId.isEmpty()) return;
++    saving = true; render();
 +    final boolean saved = !received.isSaved;
 +    tdlib.client().send(new TdApi.ToggleGiftIsSaved(received.receivedGiftId, saved), result -> UI.post(() -> {
 +      saving = false;
 +      if (ownerId != tdlib.myUserId()) return;
-+      if (result instanceof TdApi.Ok) {
-+        received.isSaved = saved; changed.run();
-+        if (current()) adapter.notifyItemChanged(0);
-+      } else UI.showToast(result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse), Toast.LENGTH_SHORT);
++      // Notify the profile even if the user dismissed the sheet while this was in flight.
++      if (result instanceof TdApi.Ok) { received.isSaved = saved; savedRevision++; if (!parent.isDestroyed()) changed.run(); }
++      else if (current()) toast(result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse));
++      if (current()) render();
 +    }));
-+  }
-+  private TextView text(Context context, CharSequence value, int size, int color) {
-+    TextView label = new TextView(context); label.setText(value); label.setTextSize(size);
-+    label.setTextColor(color); label.setGravity(Gravity.CENTER);
-+    label.setPadding(Screen.dp(12), Screen.dp(10), Screen.dp(12), Screen.dp(10));
-+    return label;
 +  }
 +  private String rarity(TdApi.UpgradedGiftAttributeRarity value) {
 +    if (value instanceof TdApi.UpgradedGiftAttributeRarityPerMille) {
 +      int n = ((TdApi.UpgradedGiftAttributeRarityPerMille) value).perMille;
-+      return n == 0 ? "<0.1%" : String.format(Locale.US, "%.1f%%", n / 10.0);
++      return n == 0 ? "<0.1%" : String.format(Locale.getDefault(), "%.1f%%", n / 10.0);
 +    }
 +    if (value instanceof TdApi.UpgradedGiftAttributeRarityUncommon) return Lang.getString(R.string.SviriRarityUncommon);
 +    if (value instanceof TdApi.UpgradedGiftAttributeRarityRare) return Lang.getString(R.string.SviriRarityRare);
@@ -4363,78 +4444,119 @@ index 0000000..a034860
 +    if (value instanceof TdApi.UpgradedGiftAttributeRarityLegendary) return Lang.getString(R.string.SviriRarityLegendary);
 +    return "";
 +  }
-+  private void row(LinearLayout wrap, int labelId, String value, String badge) {
-+    Context context = wrap.getContext(); LinearLayout row = new LinearLayout(context); row.setGravity(Gravity.CENTER_VERTICAL);
-+    TextView label = text(context, Lang.getString(labelId), 14, Theme.getColor(ColorId.textLight)); label.setGravity(Gravity.START);
++  private void row(LinearLayout table, int labelId, String value, String badge) {
++    LinearLayout row = new LinearLayout(context()); row.setGravity(Gravity.CENTER_VERTICAL); row.setMinimumHeight(Screen.dp(46));
++    row.setPadding(Screen.dp(14), Screen.dp(8), Screen.dp(14), Screen.dp(8));
++    TextView label = text(Lang.getString(labelId), 14, Theme.getColor(ColorId.textLight));
 +    row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-+    TextView data = text(context, value + (badge.isEmpty() ? "" : " · " + badge), 14, Theme.getColor(ColorId.text)); data.setGravity(Gravity.END);
++    TextView data = text(value, 14, Theme.getColor(ColorId.text)); data.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
++    data.setTypeface(null, Typeface.BOLD); data.setMaxLines(3);
 +    row.addView(data, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2));
-+    row.setPadding(Screen.dp(6), Screen.dp(2), Screen.dp(6), Screen.dp(2));
-+    row.setBackgroundColor(Theme.getColor(ColorId.filling)); wrap.addView(row);
++    if (!badge.isEmpty()) {
++      TextView rarity = text(badge, 11, Theme.getColor(ColorId.textLink)); rarity.setTypeface(null, Typeface.BOLD);
++      rarity.setPadding(Screen.dp(6), Screen.dp(4), Screen.dp(6), Screen.dp(4)); rarity.setBackground(shape(0x18339fed, 8));
++      LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++      bp.leftMargin = Screen.dp(8); row.addView(rarity, bp);
++    }
++    if (table.getChildCount() > 0) {
++      View divider = new View(context()); divider.setBackgroundColor(0x16888888);
++      LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Screen.dp(.5f)));
++      dp.leftMargin = Screen.dp(14); table.addView(divider, dp);
++    }
++    table.addView(row);
 +  }
-+  private void action(LinearLayout wrap, int label, Runnable run) {
-+    TextView button = text(wrap.getContext(), Lang.getString(label), 16, Theme.getColor(ColorId.textLink));
-+    button.setMinHeight(Screen.dp(48));
-+    GradientDrawable shape = new GradientDrawable(); shape.setColor(Theme.getColor(ColorId.filling)); shape.setCornerRadius(Screen.dp(16)); button.setBackground(shape);
-+    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); layout.topMargin = Screen.dp(8);
-+    button.setOnClickListener(view -> run.run()); wrap.addView(button, layout);
++  private void action(LinearLayout group, int label, int icon, boolean enabled, Runnable run) {
++    LinearLayout tile = column(); tile.setGravity(Gravity.CENTER); tile.setPadding(Screen.dp(4), Screen.dp(12), Screen.dp(4), Screen.dp(10));
++    TextView image = text("", 14, Theme.getColor(ColorId.textLink));
++    image.setCompoundDrawablesWithIntrinsicBounds(0, icon, 0, 0);
++    TextViewCompat.setCompoundDrawableTintList(image, ColorStateList.valueOf(Theme.getColor(ColorId.textLink)));
++    tile.addView(image, new LinearLayout.LayoutParams(Screen.dp(24), Screen.dp(24)));
++    TextView caption = text(Lang.getString(label), 12, Theme.getColor(ColorId.textLink)); caption.setGravity(Gravity.CENTER); caption.setMaxLines(2);
++    LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); tp.topMargin = Screen.dp(8); tile.addView(caption, tp);
++    clickable(tile, Theme.getColor(ColorId.filling), 16, run); tile.setEnabled(enabled); tile.setAlpha(enabled ? 1f : .45f);
++    tile.setContentDescription(Lang.getString(label));
++    LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
++    if (group.getChildCount() > 0) ap.leftMargin = Screen.dp(8); group.addView(tile, ap);
 +  }
-+  private void render(LinearLayout wrap) {
++  private void note(CharSequence message) {
++    TextView view = text(message, 12, Theme.getColor(ColorId.textLight)); view.setGravity(Gravity.CENTER);
++    view.setPadding(Screen.dp(8), Screen.dp(4), Screen.dp(8), Screen.dp(4)); add(content, view, 10);
++  }
++  private String date(int timestamp) { return DateFormat.getDateInstance(DateFormat.MEDIUM).format(new Date(timestamp * 1000L)); }
++  private void render() {
++    if (content == null || !current()) return;
 +    if (sticker != null) { sticker.performDestroy(); sticker = null; }
 +    if (heroPattern != null) heroPattern.destroyPattern();
-+    wrap.removeAllViews();
-+    boolean upgraded = received.gift instanceof TdApi.SentGiftUpgraded;
-+    TdApi.UpgradedGift gift = upgraded ? ((TdApi.SentGiftUpgraded) received.gift).gift : null;
++    content.removeAllViews();
++    TdApi.UpgradedGift gift = received.gift instanceof TdApi.SentGiftUpgraded ? ((TdApi.SentGiftUpgraded) received.gift).gift : null;
 +    TdApi.Gift regular = received.gift instanceof TdApi.SentGiftRegular ? ((TdApi.SentGiftRegular) received.gift).gift : null;
-+    if (gift == null && regular == null) return;
-+    Context context = wrap.getContext();
-+    int start = Theme.getColor(ColorId.filling), end = start, foreground = Theme.getColor(ColorId.text);
-+    if (gift != null) { start = 0xff000000 | gift.backdrop.colors.centerColor; end = 0xff000000 | gift.backdrop.colors.edgeColor; foreground = 0xff000000 | gift.backdrop.colors.textColor; }
-+    SviriGiftPatternLayout hero = new SviriGiftPatternLayout(context); hero.setGift(tdlib, gift); heroPattern = hero; hero.setOrientation(LinearLayout.VERTICAL); hero.setGravity(Gravity.CENTER);
-+    GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{start,end}); background.setCornerRadius(Screen.dp(24)); hero.setBackground(background);
-+    sticker = new StickerSmallView(context) { @Override public boolean onTouchEvent(android.view.MotionEvent e) { return false; } };
-+    sticker.init(tdlib); sticker.setEmojiDisabled(); sticker.setForceHeight(Screen.dp(200));
++    if (gift == null && regular == null) { note(Lang.getString(R.string.SviriGiftUnavailable)); return; }
++    int foreground = Theme.getColor(ColorId.text);
++    heroPattern = new SviriGiftPatternLayout(context()); heroPattern.setGift(tdlib, gift); heroPattern.setOrientation(LinearLayout.VERTICAL); heroPattern.setGravity(Gravity.CENTER);
++    heroPattern.setPadding(Screen.dp(16), Screen.dp(12), Screen.dp(16), Screen.dp(16));
++    if (gift != null) {
++      int center = 0xff000000 | gift.backdrop.colors.centerColor, edge = 0xff000000 | gift.backdrop.colors.edgeColor;
++      GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{center,edge});
++      gradient.setGradientType(GradientDrawable.RADIAL_GRADIENT); gradient.setGradientRadius(Screen.dp(230)); gradient.setGradientCenter(.5f,.27f); gradient.setCornerRadius(Screen.dp(22)); heroPattern.setBackground(gradient);
++      foreground = 0xff000000 | gift.backdrop.colors.textColor;
++    } else heroPattern.setBackground(shape(Theme.getColor(ColorId.filling), 22));
++    sticker = new StickerSmallView(context()) { @Override public boolean onTouchEvent(android.view.MotionEvent event) { return false; } };
++    sticker.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
++      @Override public void onViewAttachedToWindow(View view) { ((StickerSmallView)view).attach(); }
++      @Override public void onViewDetachedFromWindow(View view) { ((StickerSmallView)view).detach(); }
++    });
++    sticker.init(tdlib); sticker.setEmojiDisabled(); sticker.setForceHeight(Screen.dp(152));
 +    TdApi.Sticker image = gift != null ? gift.model.sticker : regular.sticker;
 +    TGStickerObj object = new TGStickerObj(tdlib, image, null, image.fullType);
 +    if (object.getPreviewAnimation() != null) object.getPreviewAnimation().setIsStill(false);
-+    sticker.setSticker(object); hero.addView(sticker, new LinearLayout.LayoutParams(Screen.dp(220),Screen.dp(200)));
-+    TextView title = text(context, gift != null ? gift.title : Lang.getString(R.string.SviriReceivedGift), 25, foreground); title.setTypeface(null, Typeface.BOLD); hero.addView(title);
-+    hero.addView(text(context, gift != null ? "#" + gift.number : regular.starCount + " ★", 16, foreground));
-+    LinearLayout.LayoutParams heroLayout = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); heroLayout.bottomMargin = Screen.dp(16); wrap.addView(hero, heroLayout);
-+    row(wrap, R.string.SviriGiftOwner, tdlib.cache().userName(ownerId), "");
-+    if (!received.isPrivate && received.senderId instanceof TdApi.MessageSenderUser) row(wrap, R.string.SviriGiftFrom, tdlib.cache().userName(((TdApi.MessageSenderUser) received.senderId).userId), "");
++    sticker.setSticker(object); heroPattern.addView(sticker, new LinearLayout.LayoutParams(Screen.dp(176), Screen.dp(152)));
++    TextView title = text(gift != null ? gift.title : Lang.getString(R.string.SviriReceivedGift), 23, foreground);
++    title.setGravity(Gravity.CENTER); title.setTypeface(null, Typeface.BOLD); add(heroPattern, title, 4);
++    TextView number = text(gift != null ? "#" + gift.number : regular.starCount + " ★", 14, foreground);
++    number.setGravity(Gravity.CENTER); number.setAlpha(.8f); add(heroPattern, number, 6); add(content, heroPattern, 0);
++    LinearLayout table = column(); table.setBackground(shape(Theme.getColor(ColorId.filling), 16)); table.setClipToOutline(true);
++    row(table, R.string.SviriGiftOwner, tdlib.cache().userName(ownerId), "");
++    if (!received.isPrivate && received.senderId instanceof TdApi.MessageSenderUser) row(table, R.string.SviriGiftFrom, tdlib.cache().userName(((TdApi.MessageSenderUser) received.senderId).userId), "");
 +    if (gift != null) {
-+      row(wrap, R.string.SviriGiftModel, gift.model.name, rarity(gift.model.rarity));
-+      row(wrap, R.string.SviriGiftBackdrop, gift.backdrop.name, rarity(gift.backdrop.rarity));
-+      row(wrap, R.string.SviriGiftSymbol, gift.symbol.name, rarity(gift.symbol.rarity));
++      row(table, R.string.SviriGiftModel, gift.model.name, rarity(gift.model.rarity));
++      row(table, R.string.SviriGiftBackdrop, gift.backdrop.name, rarity(gift.backdrop.rarity));
++      row(table, R.string.SviriGiftSymbol, gift.symbol.name, rarity(gift.symbol.rarity));
 +    }
-+    if (received.text != null && !received.text.text.isEmpty()) wrap.addView(text(context, received.text.text, 15, Theme.getColor(ColorId.text)));
-+    action(wrap, received.isSaved ? R.string.SviriGiftRemoveProfile : R.string.SviriGiftShowProfile, this::toggleSaved);
-+    if (GiftSendPolicy.transferable(received, (int)(System.currentTimeMillis()/1000))) {
-+      row(wrap, R.string.SviriGiftTransferFee, received.transferStarCount + " ★", "");
-+      action(wrap, R.string.SviriGiftTransferAction, () -> flow.transfer(received));
++    if (received.date > 0) row(table, R.string.SviriGiftReceivedDate, date(received.date), "");
++    add(content, table, 12);
++    if (received.text != null && !received.text.text.isEmpty()) {
++      TextView message = text(received.text.text, 15, Theme.getColor(ColorId.text)); message.setPadding(Screen.dp(14),Screen.dp(12),Screen.dp(14),Screen.dp(12));
++      message.setBackground(shape(Theme.getColor(ColorId.filling), 16)); add(content, message, 10);
 +    }
-+    if (org.thunderdog.challegram.telegram.GiftResalePolicy.eligible(received, System.currentTimeMillis()/1000L)) {
-+      action(wrap, R.string.SviriGiftResale, () -> resale.start(received, false));
-+      if (gift.resaleParameters != null) action(wrap, R.string.SviriGiftRemoveListing, () -> resale.start(received, true));
++    long now = System.currentTimeMillis() / 1000L;
++    boolean canTransfer = GiftSendPolicy.transferable(received, (int)now), canSell = GiftResalePolicy.eligible(received, now);
++    LinearLayout actions = new LinearLayout(context()); actions.setGravity(Gravity.CENTER); actions.setBaselineAligned(false);
++    action(actions, received.isSaved ? R.string.SviriGiftHideShort : R.string.SviriGiftShowShort,
++      received.isSaved ? R.drawable.baseline_eye_off_24 : R.drawable.baseline_visibility_24, !saving && !received.wasRefunded, this::toggleSaved);
++    if (gift != null) {
++      action(actions, R.string.SviriGiftTransferShort, R.drawable.baseline_share_24, canTransfer, () -> leave(() -> transfer.accept(received)));
++      action(actions, R.string.SviriGiftSellShort, R.drawable.baseline_star_24, canSell, () -> leave(() -> sell.accept(received)));
 +    }
-+    if (gift != null) action(wrap, R.string.SviriOpenGift, () -> tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null));
-+    action(wrap, R.string.SviriGiftBuy, () -> navigateTo(new SviriGiftCatalogController(context(), tdlib)));
-+    if (wrap.isAttachedToWindow()) sticker.attach();
++    add(content, actions, 12);
++    if (received.wasRefunded) note(Lang.getString(R.string.SviriGiftUnavailable));
++    else if (gift != null && !canTransfer && received.nextTransferDate > now) note(Lang.getString(R.string.SviriGiftTransferAfter, date(received.nextTransferDate)));
++    if (gift != null && !canSell && received.nextResaleDate > now) note(Lang.getString(R.string.SviriGiftSaleAfter, date(received.nextResaleDate)));
++    if (gift != null && canTransfer && received.transferStarCount > 0) note(Lang.getString(R.string.SviriGiftTransferFee) + ": " + received.transferStarCount + " ★");
++    if (gift != null && gift.resaleParameters != null) linkAction(R.string.SviriGiftRemoveListing, () -> leave(() -> removeListing.accept(received)));
++    if (gift != null && gift.name != null && !gift.name.isEmpty()) linkAction(R.string.CopyLink, () -> UI.copyText("https://t.me/nft/" + gift.name, R.string.CopiedLink));
++    linkAction(R.string.SviriGiftBuy, () -> leave(buy));
++    if (content.isAttachedToWindow()) sticker.attach();
 +  }
-+  private final class DetailsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
-+    @Override public int getItemCount() { return 1; }
-+    @Override public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int type) {
-+      LinearLayout wrap = new LinearLayout(parent.getContext()); wrap.setOrientation(LinearLayout.VERTICAL);
-+      wrap.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-+      return new RecyclerView.ViewHolder(wrap) {};
-+    }
-+    @Override public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) { render((LinearLayout) holder.itemView); }
-+    @Override public void onViewAttachedToWindow(RecyclerView.ViewHolder holder) { if (sticker != null) sticker.attach(); }
-+    @Override public void onViewDetachedFromWindow(RecyclerView.ViewHolder holder) { if (sticker != null) sticker.detach(); }
++  private void linkAction(int label, Runnable run) {
++    TextView button = text(Lang.getString(label), 14, Theme.getColor(ColorId.textLink)); button.setGravity(Gravity.CENTER); button.setMinHeight(Screen.dp(44));
++    clickable(button, Theme.getColor(ColorId.filling), 14, run); add(content, button, 8);
 +  }
 +  @Override public void destroy() {
-+    if (heroPattern != null) heroPattern.destroyPattern(); if (resale != null) resale.destroy(); if (flow != null) flow.destroy(); if (sticker != null) sticker.performDestroy(); sticker = null; super.destroy();
++    if (isDestroyed()) return;
++    if (readTimeout != null) UI.removePendingRunnable(readTimeout);
++    if (heroPattern != null) heroPattern.destroyPattern();
++    if (sticker != null) sticker.performDestroy();
++    sticker = null; super.destroy();
 +  }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
@@ -4606,7 +4728,7 @@ index 0000000..ffda35a
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
 new file mode 100644
-index 0000000..fba85cc
+index 0000000..79a153b
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
 @@ -0,0 +1,53 @@
@@ -4625,7 +4747,7 @@ index 0000000..fba85cc
 +import org.thunderdog.challegram.tool.Screen;
 +
 +/** The collectible's actual symbol, decoded once as a still frame and repeated behind its model. */
-+final class SviriGiftPatternLayout extends LinearLayout {
++class SviriGiftPatternLayout extends LinearLayout {
 +  private final ImageReceiver image = new ImageReceiver(this, 0);
 +  private final GifReceiver animation = new GifReceiver(this);
 +  private boolean patterned;
@@ -4789,10 +4911,10 @@ index 0000000..f638b1a
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
-index 0000000..4a34195
+index 0000000..c0f1d7a
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
-@@ -0,0 +1,302 @@
+@@ -0,0 +1,331 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -4838,6 +4960,9 @@ index 0000000..4a34195
 +  private String bio = "";
 +  private boolean balanceLoading;
 +  private int giftCount;
++  private SviriGiftDetailsController giftSheet;
++  private SviriGiftFlow giftFlow;
++  private SviriGiftResaleFlow resaleFlow;
 +  private final Consumer<TdApi.StarAmount> balanceListener = value -> {
 +    if (!isDestroyed() && adapter != null) adapter.notifyItemChanged(0);
 +  };
@@ -4954,7 +5079,13 @@ index 0000000..4a34195
 +    generation++; loading = false; loaded = false; offset = ""; gifts.clear(); seen.clear(); load(); loadBalance();
 +  }
 +  private void showGift (TdApi.ReceivedGift received) {
-+    navigateTo(new SviriGiftDetailsController(context(), tdlib, received, this::refreshGifts));
++    if (giftSheet != null && !giftSheet.isDestroyed()) return;
++    if (giftFlow == null) giftFlow = new SviriGiftFlow(this, tdlib, this::refreshGifts);
++    if (resaleFlow == null) resaleFlow = new SviriGiftResaleFlow(this, tdlib, this::refreshGifts);
++    giftSheet = new SviriGiftDetailsController(this, received, this::refreshGifts,
++      giftFlow::transfer, gift -> resaleFlow.start(gift, false), gift -> resaleFlow.start(gift, true),
++      () -> navigateTo(new SviriGiftCatalogController(context(), tdlib)));
++    giftSheet.show();
 +  }
 +  private final class Card extends RecyclerView.ViewHolder {
 +    final StickerSmallView sticker;
@@ -4964,16 +5095,31 @@ index 0000000..4a34195
 +      super(column(context));
 +      LinearLayout outer = (LinearLayout) itemView;
 +      outer.setPadding(Screen.dp(5), Screen.dp(5), Screen.dp(5), Screen.dp(5));
-+      panel = new SviriGiftPatternLayout(context); panel.setOrientation(LinearLayout.VERTICAL); panel.setGravity(Gravity.CENTER);
++      panel = new SviriGiftPatternLayout(context) {
++        @Override protected void onMeasure(int widthSpec, int heightSpec) {
++          int width = View.MeasureSpec.getSize(widthSpec);
++          if (width > 0 && getChildCount() > 0) {
++            int imageHeight = Math.max(Screen.dp(48), width - Screen.dp(48));
++            View image = getChildAt(0);
++            image.getLayoutParams().height = imageHeight;
++            ((StickerSmallView) image).setForceHeight(imageHeight);
++            heightSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY);
++          }
++          super.onMeasure(widthSpec, heightSpec);
++        }
++      }; panel.setOrientation(LinearLayout.VERTICAL); panel.setGravity(Gravity.CENTER);
 +      panel.setPadding(0, Screen.dp(6), 0, Screen.dp(8));
-+      outer.addView(panel);
++      outer.addView(panel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 +      sticker = new StickerSmallView(context) {
 +        @Override public boolean onTouchEvent (android.view.MotionEvent event) { return false; }
 +      };
 +      sticker.init(tdlib); sticker.setForceHeight(Screen.dp(94));
 +      panel.addView(sticker, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(94)));
-+      title = text(context, "", 12); title.setMaxLines(2);
-+      subtitle = text(context, "", 11);
++      title = text(context, "", 11); title.setMaxLines(1);
++      title.setEllipsize(android.text.TextUtils.TruncateAt.END);
++      title.setPadding(Screen.dp(4), Screen.dp(2), Screen.dp(4), Screen.dp(2));
++      subtitle = text(context, "", 10); subtitle.setMaxLines(1);
++      subtitle.setPadding(Screen.dp(4), Screen.dp(2), Screen.dp(4), Screen.dp(2));
 +      panel.addView(title); panel.addView(subtitle);
 +      cards.add(this);
 +    }
@@ -4991,11 +5137,13 @@ index 0000000..4a34195
 +      } else {
 +        panel.setGift(tdlib, null);
 +        TdApi.Gift gift = ((TdApi.SentGiftRegular) received.gift).gift;
-+        image = gift.sticker; title.setText(image.emoji + " " + Lang.getString(R.string.SviriReceivedGift));
++        image = gift.sticker; title.setText(Lang.getString(R.string.SviriReceivedGift));
++        start = Theme.getColor(ColorId.background);
++        end = Theme.getColor(ColorId.filling);
 +        subtitle.setText(gift.starCount + " ★");
 +      }
 +      GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{start, end});
-+      background.setCornerRadius(Screen.dp(20)); panel.setBackground(background);
++      background.setCornerRadius(Screen.dp(14)); panel.setBackground(background); panel.setClipToOutline(true);
 +      title.setTextColor(foreground); subtitle.setTextColor(foreground);
 +      TGStickerObj object = new TGStickerObj(tdlib, image, null, image.fullType);
 +      // Native first-frame decoding: no continuously running animations in the grid.
@@ -5088,6 +5236,9 @@ index 0000000..4a34195
 +  }
 +  @Override public void destroy () {
 +    generation++;
++    if (giftSheet != null) { giftSheet.dismiss(); giftSheet.destroy(); }
++    if (giftFlow != null) giftFlow.destroy();
++    if (resaleFlow != null) resaleFlow.destroy();
 +    tdlib.removeStarAmountListener(balanceListener);
 +    for (Card card : cards) { card.sticker.performDestroy(); card.panel.destroyPattern(); }
 +    for (AvatarView avatar : avatars) avatar.performDestroy();
@@ -5431,7 +5582,7 @@ index 98ed3d2..c28515f 100644
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..f8b4eff 100644
+index 416f9af..65f2766 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -5450,7 +5601,7 @@ index 416f9af..f8b4eff 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,93 @@
+@@ -5909,4 +5919,101 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -5543,6 +5694,14 @@ index 416f9af..f8b4eff 100644
 +  <string name="SviriGiftListingPrice">Listing price: %1$d Stars</string>
 +  <string name="SviriGiftListingNote">Telegram applies its resale commission. This sets the buyer price, not your net proceeds. The gift stays listed until sold or removed.</string>
 +  <string name="SviriGiftListingUpdated">Sale listing updated</string>
++  <string name="SviriGiftReceivedDate">Received</string>
++  <string name="SviriGiftHideShort">Hide</string>
++  <string name="SviriGiftShowShort">Show</string>
++  <string name="SviriGiftTransferShort">Transfer</string>
++  <string name="SviriGiftSellShort">Sell</string>
++  <string name="SviriGiftTransferAfter">Transfer available after %1$s</string>
++  <string name="SviriGiftSaleAfter">Sale available after %1$s</string>
++  <string name="SviriGiftClose">Close</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644

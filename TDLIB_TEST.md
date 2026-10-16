@@ -23,3 +23,13 @@ Build 26 passed the Kotlin helper stage and stopped at Java compilation with two
 Build 27 passed Java and failed in the old WebRTC candidate.h setter: Clang 21 rejects a lifetimebound attribute on a void-returning function. The next build pins the official WebRTC commit 7b03082ff07aa442bcbb09ea54b8c33b4fef7e6d used by current TGX; its setter removes that invalid annotation.
 
 Side-by-side installation: configure.py now sets ua.swiryyyyx.client.test, app.name=swiryyyyX Test and app.experimental=true. The original ua.swiryyyyx.client application stays separate. App storage, account databases, content providers, sync account type and notification services derive from the new application ID. A fresh Telegram login is required in Test. No Firebase configuration is fabricated or reused under another package name; Firebase push is unavailable for this Test package until its Android app registration is configured.
+
+
+Gift sheet revision (after build 28):
+- Open gifts in a rounded bottom popup over the profile, with dismiss handle, close control and fixed Done button. Scroll content independently on small displays.
+- Compact native animated hero; radial collectible backdrop and actual symbol; grouped property table and independent rarity badges.
+- Hide/show, transfer and Stars sale action tiles. Server cooldown dates explain disabled actions. Copy collectible link without routing into an unsupported internal-link handler.
+- Gift payment flows belong to the profile: dismiss the sheet before opening a recipient picker or price dialog, without destroying the payment flow. Profile destruction cleans the popup and both flows.
+- Save state revision prevents a stale gift read from overwriting a completed profile-visibility change. Initial read has a 30s timeout.
+- Compact square gallery cells and consistent regular-gift panels; grid uses still frames, only the opened gift animates.
+Validation: local regression/API payment checks and Java syntax/resources pass; Android CI and device visual checks pending. This is a custom native TGX sheet, not a full port of Telegram Android gifts.
