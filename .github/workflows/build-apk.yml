@@ -61,6 +61,13 @@ jobs:
           test "$(git -C source/tdlib rev-parse HEAD)" = "1094df0caf4e5b59f6b247f8d9eb8896022cb379"
           test "$(head -n 1 source/tdlib/version.txt)" = "c15d3f5a5de6e3ba5839822c451152e5e18bb700"
           echo "TDLib bundle 1094df0; source c15d3f5; NDK 30.0.16248370"
+      - name: Verify chat and gift regressions
+        working-directory: source
+        run: |
+          python3 tests/sviri/run_checks.py
+          python3 tests/sviri/check_tab_width.py
+          python3 tests/sviri/check_gift_manage.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
+          python3 tests/sviri/check_gift_resale.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
