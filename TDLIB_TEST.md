@@ -33,3 +33,5 @@ Gift sheet revision (after build 28):
 - Save state revision prevents a stale gift read from overwriting a completed profile-visibility change. Initial read has a 30s timeout.
 - Compact square gallery cells and consistent regular-gift panels; grid uses still frames, only the opened gift animates.
 Validation: local regression/API payment checks and Java syntax/resources pass; Android CI and device visual checks pending. This is a custom native TGX sheet, not a full port of Telegram Android gifts.
+
+Tab crash hotfix: rebuild metrics on insertion/removal, clamp selection, retain an owned list, recover stale width metrics in onMeasure. Regression executes the real methods for the reported 1244 -> 901 crash, empty lists and 200 tab changes. Included in stable and Test patches.

@@ -675,7 +675,7 @@ index d993d4f..e99b5cb 100644
        Views.destroyRecyclerView(chatSearchView);
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java b/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java
-index 310fa4f..dbb053e 100644
+index 310fa4f..343763c 100644
 --- a/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java
 +++ b/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java
 @@ -23,6 +23,7 @@ import android.graphics.Paint;
@@ -699,7 +699,95 @@ index 310fa4f..dbb053e 100644
    private boolean drawSelectionAtTop;
  
    public void setDrawSelectionAtTop (boolean drawSelectionAtTop) {
-@@ -1078,7 +1085,12 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+@@ -594,7 +601,7 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+       }
+     }
+     removeAllViews();
+-    this.items = items;
++    this.items = new ArrayList<>(items);
+     onUpdateItems();
+ 
+     measureItems();
+@@ -643,18 +650,10 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+ 
+     TextPaint paint = getItemTextPaint(item);
+     measureItem(item, paint);
+-    int itemWidth = item.width;
+-    totalWidth += itemWidth + itemPadding * 2;
+-    maxItemWidth = totalWidth / items.size();
+-
+-    commonItemWidth = calculateCommonItemWidth(itemWidth);
++    // Rebuild all cached widths, including active-only labels and hit targets.
++    selectionFactor = Math.min(selectionFactor, items.size() - 1);
++    relayout();
+ 
+-    final int availTextWidth = commonItemWidth - itemPadding * 2;
+-    if (!shouldWrapContent() && itemWidth < availTextWidth) {
+-      item.trimString(availTextWidth, paint);
+-    } else {
+-      item.untrimString(paint);
+-    }
+     // We already have backgroundView with insertion index, adding for the last one
+     // (for which there is no backgroundView yet)
+     addView(newBackgroundView(items.size() - 1));
+@@ -676,12 +675,14 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+ 
+     onUpdateItems();
+ 
+-    if ((int) selectionFactor >= items.size()) {
++    if (index < (int) selectionFactor) {
+       selectionFactor--;
+     }
++    selectionFactor = Math.max(0f, Math.min(selectionFactor, items.size() - 1));
+ 
+     // Removing BackgroundView for the last item only, as other just update dimensions
+     removeViewAt(getChildCount() - 1);
++    relayout();
+     invalidate();
+   }
+ 
+@@ -701,11 +702,15 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+     return Paints.getViewPagerTextPaint(Theme.headerTextColor(), item.needFakeBold);
+   }
+ 
+-  private void relayout () {
+-    this.totalWidth = calculateTotalWidth();
++  private void updateWidthMetrics (int totalWidth) {
++    this.totalWidth = totalWidth;
+     this.maxStableWidth = calculateMaxStableWidth(totalWidth);
+     this.maxItemWidth = items == null || items.isEmpty() ? 0 : (totalWidth / items.size());
+-    this.lastMeasuredWidth = 0; // force layout
++    this.lastMeasuredWidth = 0; // Force selection and background bounds to be laid out again.
++  }
++
++  private void relayout () {
++    updateWidthMetrics(calculateTotalWidth());
+     requestLayout();
+   }
+ 
+@@ -779,10 +784,9 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+     if (shouldWrapContent()) {
+       int totalWidth = calculateTotalWidth();
+       if (totalWidth != this.totalWidth) {
+-        if (BuildConfig.DEBUG) {
+-          throw new IllegalStateException("this.totalWidth = " + this.totalWidth + ", totalWidth = " + totalWidth);
+-        }
+-        maxStableWidth = calculateMaxStableWidth(totalWidth);
++        // Item counters and asynchronous profile tabs can change between passes.
++        // Recover the complete metrics snapshot before laying out, also in debug APKs.
++        updateWidthMetrics(totalWidth);
+       }
+       layout(totalWidth, /* wrapContent */ true); // must be before super.onMeasure
+       super.onMeasure(MeasureSpec.makeMeasureSpec(totalWidth, MeasureSpec.EXACTLY), heightMeasureSpec);
+@@ -796,6 +800,7 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+   private int commonItemWidth;
+ 
+   private int calculateCommonItemWidth (int parentWidth) {
++    if (items == null || items.isEmpty()) return 0;
+     int itemWidth = Math.min(parentWidth / items.size(), maxItemWidth);
+     if (parentWidth - itemWidth * items.size() < itemWidth / 2) {
+       itemWidth = parentWidth / items.size();
+@@ -1078,7 +1083,12 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
        int selectionTop = this.drawSelectionAtTop ? 0 : viewHeight - selectionHeight;
        int selectionBottom = selectionTop + selectionHeight;
  
@@ -6479,6 +6567,53 @@ index 0000000..2a55a12
 + p=Path(temp)/'StarsStateTest.java';p.write_text(source)
 + subprocess.run(['java','com.sun.tools.javac.Main','-d',temp,str(p)],check=True)
 + subprocess.run(['java','-cp',temp,'StarsStateTest'],check=True)
+diff --git a/tests/sviri/check_tab_width.py b/tests/sviri/check_tab_width.py
+new file mode 100644
+index 0000000..27bd5c8
+--- /dev/null
++++ b/tests/sviri/check_tab_width.py
+@@ -0,0 +1,41 @@
++"""Execute the actual tab mutation/measurement methods with a minimal view harness."""
++from pathlib import Path
++import subprocess,tempfile
++root=Path(__file__).resolve().parents[2]
++source=(root/'app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java').read_text()
++def method(signature):
++ a=source.index(signature);start=source.index('{',a);depth=1;b=start+1
++ while depth:
++  if source[b]=='{':depth+=1
++  elif source[b]=='}':depth-=1
++  b+=1
++ return source[a:b]
++methods='\n'.join(method(s) for s in ['  public void addItemAtIndex (Item item, int index)', '  public void removeItemAt (int index)', '  private void updateWidthMetrics (int totalWidth)', '  private void relayout ()', '  private int calculateTotalWidth ()', '  private int calculateMaxStableWidth (int totalWidth)', '  private int calculateCommonItemWidth (int parentWidth)', '  protected void onMeasure (int widthMeasureSpec, int heightMeasureSpec)'])
++java='''import java.util.*;
++class Base { int measuredWidth; protected void onMeasure(int w,int h){measuredWidth=w;} int getMeasuredWidth(){return measuredWidth;} }
++public class TabWidthTest extends Base {
++static class Item { int width,collapsed; Item(int w){width=w;collapsed=w/2;} int getCollapsedWidth(){return collapsed;} int getExpandedWidth(){return width;} }
++static class TextPaint{} static class MeasureSpec{static final int EXACTLY=1;static int makeMeasureSpec(int w,int m){return w;}}
++List<Item> items=new ArrayList<>(); int itemPadding=0,totalWidth,maxStableWidth,maxItemWidth,lastMeasuredWidth,commonItemWidth;float selectionFactor;
++boolean showLabelOnActiveOnly,fitsParentWidth;int children,requests;boolean wrap=true;
++void requestLayout(){requests++;} void invalidate(){} void onUpdateItems(){} TextPaint getItemTextPaint(Item i){return new TextPaint();}void measureItem(Item i,TextPaint p){}
++void addView(Object v){children++;}Object newBackgroundView(int i){return new Object();}void removeViewAt(int i){if(i<0)throw new AssertionError();children--;}int getChildCount(){return children;}
++boolean shouldWrapContent(){return wrap;}void layout(int w,boolean wrap){if(w>0&&!items.isEmpty())commonItemWidth=calculateCommonItemWidth(w);lastMeasuredWidth=w;}
++'''+methods+'''
++static void check(boolean ok){if(!ok)throw new AssertionError();}
++void verify(){onMeasure(2000,40);check(totalWidth==calculateTotalWidth());check(totalWidth==measuredWidth);check(maxStableWidth==calculateMaxStableWidth(totalWidth));check(maxItemWidth==(items.isEmpty()?0:totalWidth/items.size()));check(children==items.size());}
++public static void main(String[] args){TabWidthTest t=new TabWidthTest();
++// Exact reported crash: stale 1244 after removing a 343px profile tab.
++t.addItemAtIndex(new Item(400),-1);t.addItemAtIndex(new Item(501),-1);t.addItemAtIndex(new Item(343),-1);check(t.totalWidth==1244);t.selectionFactor=2;t.removeItemAt(2);check(t.totalWidth==901);check(t.selectionFactor==1);t.verify();
++t.removeItemAt(0);check(t.selectionFactor==0);t.verify();t.removeItemAt(0);check(t.selectionFactor==0&&t.totalWidth==0);t.verify();check(t.calculateCommonItemWidth(500)==0);
++t.showLabelOnActiveOnly=true;t.itemPadding=8;t.addItemAtIndex(new Item(180),0);check(t.selectionFactor==0);t.verify();t.addItemAtIndex(new Item(90),0);check(t.selectionFactor==1);t.verify();
++// Recover every dependent cache when widths change between measurement passes.
++t.items.get(0).width+=37;t.lastMeasuredWidth=999;t.onMeasure(1000,40);t.verify();
++for(int i=0;i<200;i++){t.addItemAtIndex(new Item(50+i),-1);t.verify();}while(!t.items.isEmpty()){t.removeItemAt(t.items.size()/2);t.verify();}
++System.out.println("PASS: actual tab methods reproduce 1244 -> 901; remove/insert/selection, empty tabs, active-label widths, stale-cache recovery and 200 mutations");}
++}
++'''
++with tempfile.TemporaryDirectory() as tmp:
++ p=Path(tmp)/'TabWidthTest.java';p.write_text(java)
++ subprocess.run(['java','com.sun.tools.javac.Main','-d',tmp,str(p)],check=True)
++ subprocess.run(['java','-cp',tmp,'TabWidthTest'],check=True)
 diff --git a/tests/sviri/check_themes.py b/tests/sviri/check_themes.py
 new file mode 100644
 index 0000000..131900f
