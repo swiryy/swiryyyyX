@@ -30,6 +30,70 @@ index 0000000..9e68d75
 +- Settings/Profile → Telegram Stars: баланс та історія через GetStarTransactions, сторінки по 50, повтор після помилки, ручне оновлення.
 +- Settings/Profile → Collectible gifts: власні upgraded gifts через GetReceivedGifts, сторінки по 50, назва/номер, Model/Symbol/Backdrop і посилання t.me/nft.
 +- Купівлю Stars, продаж/передачу/покращення подарунків і галерею з анімованими мініатюрами ще не реалізовано. Розділи завантажуються лише при відкритті.
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 27ff03a..9ed8ea9 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -44,13 +44,13 @@ val validateGitSetupTask = tasks.register<ValidateGitSetupTask>("validateGitSetu
+     layout.projectDirectory.dir(
+       "../tdlib/src/main/libs"
+     ).asFileTree.matching {
+-      include("*/*/*.so")
++      include("*/*/*/*.so")
+     },
+     layout.projectDirectory.dir(
+       "../tdlib/openssl"
+     ).asFileTree.matching {
+-      include("*/*/lib/libcryptox.so")
+-      include("*/*/lib/libsslx.so")
++      include("*/*/*/lib/libcryptox.so")
++      include("*/*/*/lib/libsslx.so")
+     }
+   )
+ }
+@@ -835,7 +835,7 @@ android {
+ 
+         var openSslVersionFull = ""
+         var openSslReleaseDate = ""
+-        val openSslVersionFile = requireFile(project.isolated.rootProject.projectDirectory.file("tdlib/openssl/${ndkVersion}/${abiVariant.filters.first()}/include/openssl/opensslv.h").asFile)
++        val openSslVersionFile = requireFile(project.isolated.rootProject.projectDirectory.file("tdlib/openssl/${ndkVersion}/android-${sdkVariant.minSdk}/${abiVariant.filters.first()}/include/openssl/opensslv.h").asFile)
+         openSslVersionFile.bufferedReader().use { reader ->
+           val regex = Regex("^# define (OPENSSL_FULL_VERSION_STR|OPENSSL_RELEASE_DATE)\\s*\"([^\"]+)\"$")
+           while (true) {
+diff --git a/app/jni/CMakeLists.txt b/app/jni/CMakeLists.txt
+index 0754dfb..44ccf08 100644
+--- a/app/jni/CMakeLists.txt
++++ b/app/jni/CMakeLists.txt
+@@ -74,24 +74,24 @@ add_compile_options(
+ 
+ add_library(crypto SHARED IMPORTED)
+ set_target_properties(crypto PROPERTIES IMPORTED_LOCATION
+-  ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_ABI}/lib/libcryptox.so
++  ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_PLATFORM}/${ANDROID_ABI}/lib/libcryptox.so
+ )
+ add_library(ssl SHARED IMPORTED)
+ set_target_properties(ssl PROPERTIES IMPORTED_LOCATION
+-  ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_ABI}/lib/libsslx.so
++  ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_PLATFORM}/${ANDROID_ABI}/lib/libsslx.so
+ )
+ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.11.0")
+   target_include_directories(crypto INTERFACE
+-    ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_ABI}/include
++    ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_PLATFORM}/${ANDROID_ABI}/include
+   )
+   target_include_directories(ssl INTERFACE
+-    ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_ABI}/include
++    ${TDLIB_DIR}/openssl/${ANDROID_NDK_REVISION}/${ANDROID_PLATFORM}/${ANDROID_ABI}/include
+   )
+ endif()
+ 
+ add_library(tdjni SHARED IMPORTED)
+ set_target_properties(tdjni PROPERTIES IMPORTED_LOCATION
+-  ${TDLIB_DIR}/src/main/libs/${ANDROID_NDK_REVISION}/${ANDROID_ABI}/libtdjni.so
++  ${TDLIB_DIR}/src/main/libs/${ANDROID_NDK_REVISION}/${ANDROID_PLATFORM}/${ANDROID_ABI}/libtdjni.so
+ )
+ target_link_libraries(tdjni INTERFACE crypto ssl)
+ 
 diff --git a/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java b/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java
 index f5bdb46..4611363 100644
 --- a/app/src/main/java/org/thunderdog/challegram/component/dialogs/ChatView.java
@@ -333,6 +397,44 @@ index d993d4f..e99b5cb 100644
        TGLegacyManager.instance().removeEmojiListener(chatSearchAdapter);
        Views.destroyRecyclerView(chatSearchView);
      }
+diff --git a/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java b/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java
+index 310fa4f..dbb053e 100644
+--- a/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java
++++ b/app/src/main/java/org/thunderdog/challegram/navigation/ViewPagerTopView.java
+@@ -23,6 +23,7 @@ import android.graphics.Paint;
+ import android.graphics.PorterDuff;
+ import android.graphics.PorterDuffXfermode;
+ import android.graphics.Rect;
++import android.graphics.RectF;
+ import android.graphics.Shader;
+ import android.graphics.drawable.Drawable;
+ import android.os.SystemClock;
+@@ -389,6 +390,12 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+     this.fitsParentWidth = fits;
+   }
+ 
++  private boolean pillSelection;
++  private final RectF pillSelectionBounds = new RectF();
++  public void setPillSelection(boolean enabled) {
++    if (pillSelection != enabled) { pillSelection = enabled; invalidate(); }
++  }
++
+   private boolean drawSelectionAtTop;
+ 
+   public void setDrawSelectionAtTop (boolean drawSelectionAtTop) {
+@@ -1078,7 +1085,12 @@ public class ViewPagerTopView extends FrameLayoutFix implements RtlCheckListener
+       int selectionTop = this.drawSelectionAtTop ? 0 : viewHeight - selectionHeight;
+       int selectionBottom = selectionTop + selectionHeight;
+ 
++      if (pillSelection) {
++        pillSelectionBounds.set(selectionLeft + Screen.dp(2), Screen.dp(4), selectionRight - Screen.dp(2), viewHeight - Screen.dp(4));
++        c.drawRoundRect(pillSelectionBounds, Screen.dp(20), Screen.dp(20), Paints.fillingPaint(ColorUtils.alphaColor(.16f * (1f - disabledFactor), selectionColor)));
++      } else {
+       c.drawRect(selectionLeft, selectionTop, selectionRight, selectionBottom, Paints.fillingPaint(disabledFactor == 0f ? selectionColor : ColorUtils.fromToArgb(selectionColor, textFromColor, disabledFactor)));
++      }
+ 
+       int cx = rtl ? totalWidth : 0;
+       int itemIndex = 0;
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java b/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java
 new file mode 100644
 index 0000000..7d6a11e
@@ -678,7 +780,7 @@ index 0000000..47a069a
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java
 new file mode 100644
-index 0000000..a52bd0e
+index 0000000..02dd166
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/GiftPaymentTask.java
 @@ -0,0 +1,26 @@
@@ -694,7 +796,7 @@ index 0000000..a52bd0e
 +public final class GiftPaymentTask {
 +  private static final HashSet<Integer> active = new HashSet<>();
 +  public static boolean send (Tdlib tdlib, TdApi.Function<?> request, Consumer<TdApi.Object> callback) {
-+    if (!(request instanceof TdApi.SendGift || request instanceof TdApi.TransferGift)) throw new IllegalArgumentException();
++    if (!(request instanceof TdApi.SendGift || request instanceof TdApi.TransferGift || request instanceof TdApi.SetGiftResalePrice)) throw new IllegalArgumentException();
 +    if (!active.add(tdlib.id())) return false;
 +    tdlib.incrementJobReferenceCount("swir-gift-payment");
 +    final boolean[] finished = {false};
@@ -706,6 +808,30 @@ index 0000000..a52bd0e
 +      callback.accept(result);
 +    }));
 +    return true;
++  }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftResalePolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftResalePolicy.java
+new file mode 100644
+index 0000000..53e65de
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/GiftResalePolicy.java
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++import org.drinkless.tdlib.TdApi;
++
++/** Eligibility and integer bounds from the server, without guessing a price or commission. */
++public final class GiftResalePolicy {
++  private GiftResalePolicy() { }
++  public static boolean eligible(TdApi.ReceivedGift gift, long now) {
++    return gift != null && gift.receivedGiftId != null && !gift.receivedGiftId.isEmpty()
++      && !gift.wasRefunded && gift.gift instanceof TdApi.SentGiftUpgraded
++      && gift.nextResaleDate > 0 && gift.nextResaleDate <= now;
++  }
++  public static long parseStars(String input, long min, long max) {
++    if (min <= 0 || max < min || input == null || !input.matches("[0-9]{1,19}")) return -1;
++    try { long value = Long.parseLong(input); return value >= min && value <= max ? value : -1; }
++    catch (NumberFormatException e) { return -1; }
 +  }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftSendPolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftSendPolicy.java
@@ -879,7 +1005,7 @@ index 0000000..275a580
 +  }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
-index 11c4bfb..6c15959 100644
+index 11c4bfb..0d2e993 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 @@ -494,6 +494,69 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
@@ -1047,6 +1173,15 @@ index 11c4bfb..6c15959 100644
      startupPerformed = true;
    }
  
+@@ -4874,7 +5015,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+       emoji().findOrRequest(customEmojiId, (entry, inPlace) -> {
+         if (entry != null && !entry.isNotFound()) {
+           TdApi.Sticker customEmojiSticker = entry.value;
+-          TdApi.MessageAnimatedEmoji animatedEmoji = new TdApi.MessageAnimatedEmoji(new TdApi.AnimatedEmoji(customEmojiSticker, customEmojiSticker.width, customEmojiSticker.height, 0, null), content.text.text);
++          TdApi.MessageAnimatedEmoji animatedEmoji = new TdApi.MessageAnimatedEmoji(new TdApi.AnimatedEmoji(customEmojiSticker, customEmojiSticker.width, customEmojiSticker.height, 0, null, false), content.text.text);
+           performEdit(chatId, messageId, animatedEmoji, new TdApi.EditMessageText(chatId, messageId, null, content), pendingMessageTexts);
+         } else {
+           animatedEmojiFallback.run();
 @@ -7778,6 +7919,8 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          chatList.onUpdateNewChat(update.chat);
        }
@@ -2266,6 +2401,19 @@ index aa708d3..614f3d1 100644
    // Updates
  
    @Override
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/EditUsernameController.java b/app/src/main/java/org/thunderdog/challegram/ui/EditUsernameController.java
+index cb2711b..65b209d 100644
+--- a/app/src/main/java/org/thunderdog/challegram/ui/EditUsernameController.java
++++ b/app/src/main/java/org/thunderdog/challegram/ui/EditUsernameController.java
+@@ -133,7 +133,7 @@ public class EditUsernameController extends EditBaseController<EditUsernameContr
+     } else {
+       usernames = tdlib.myUserUsernames();
+     }
+-    sourceUsernames = usernames != null ? usernames : new TdApi.Usernames(new String[0], new String[0], "", new String[0]);
++    sourceUsernames = usernames != null ? usernames : new TdApi.Usernames(new String[0], new String[0], "", new String[0], "");
+     activeUsernames = new LinkedHashSet<>();
+     Collections.addAll(activeUsernames, sourceUsernames.activeUsernames);
+     if (TEST_MULTI_USERNAMES_UI) {
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java b/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java
 index e903305..bfa950c 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/IntroController.java
@@ -2302,7 +2450,7 @@ index e903305..bfa950c 100644
      return titles[pos];
    }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
-index f81e95e..50fdc28 100644
+index f81e95e..d0e66a6 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/MainController.java
 @@ -22,6 +22,9 @@ import android.content.Intent;
@@ -2387,7 +2535,7 @@ index f81e95e..50fdc28 100644
 +    mainWrap.addView(sviriNavigation, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(64), Gravity.BOTTOM, Screen.dp(12), 0, Screen.dp(12), Screen.dp(12) + extraBottomInsetWithoutIme));
 +    sviriFolders = new SviriPill(context);
 +    addThemeInvalidateListener(sviriFolders);
-+    mainWrap.addView(sviriFolders, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(38), Gravity.TOP, Screen.dp(12), Screen.dp(64), Screen.dp(12), 0));
++    mainWrap.addView(sviriFolders, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, Screen.dp(44), Gravity.TOP, Screen.dp(12), Screen.dp(64), Screen.dp(12), 0));
 +    checkTabs();
 +    checkPagerMargins();
 +  }
@@ -2539,7 +2687,7 @@ index f81e95e..50fdc28 100644
      }
 +    if (sviriNavigation != null) {
 +      boolean visible = sviriNavigation.getVisibility() == View.VISIBLE;
-+      Views.setTopMargin(pagerWrap, visible ? Screen.dp(110) : 0);
++      Views.setTopMargin(pagerWrap, visible ? Screen.dp(116) : 0);
 +      int bottom = visible ? Screen.dp(80) + extraBottomInsetWithoutIme : 0;
 +      Views.setBottomMargin(pagerWrap, bottom + (updateSnackBar != null ? Math.round(updateSnackBar.getHeight() * updateSnackBar.getVisibilityFactor()) : 0));
 +    }
@@ -2665,7 +2813,7 @@ index f81e95e..50fdc28 100644
          tdlib.send(new TdApi.GetChatFolder(chatFolderId), (chatFolder, error) -> runOnUiThreadOptional(() -> {
            if (error != null) {
              UI.showError(error);
-@@ -2769,89 +2861,23 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2769,89 +2861,24 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    private void checkTabs () {
@@ -2764,6 +2912,7 @@ index f81e95e..50fdc28 100644
 +    headerCell.getTopView().setShowLabelOnActiveOnly(false);
 +    headerCell.getTopView().setUseDarkBackground(false);
 +    headerCell.getTopView().setDrawSelectionAtTop(false);
++    headerCell.getTopView().setPillSelection(true);
 +    headerCell.getTopView().setItemPadding(Screen.dp(12));
 +    headerCell.getTopView().setItemSpacing(Screen.dp(4));
 +    headerCell.getTopView().setSelectionColorId(ColorId.textLink);
@@ -2772,7 +2921,7 @@ index f81e95e..50fdc28 100644
    }
  
    private void checkMenu () {
-@@ -2872,7 +2898,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2872,7 +2899,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    private boolean displayTabsAtBottom () {
@@ -2781,7 +2930,7 @@ index f81e95e..50fdc28 100644
    }
  
    private void initPagerSections () {
-@@ -2912,7 +2938,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2912,7 +2939,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        } else {
          archiveChatListPosition = NO_POSITION;
        }
@@ -2790,7 +2939,7 @@ index f81e95e..50fdc28 100644
        chatLists = new ArrayList<>(chatListCount);
        sections = new ArrayList<>(chatListCount);
        int chatFolderIndex = 0;
-@@ -2991,7 +3017,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -2991,7 +3018,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
      int selectedFilter = getSelectedFilter(pagerItemId);
      Counter unreadCounter = buildUnreadCounter(pagerItemId, selectedFilter);
      if (unreadCounter != null) {
@@ -2799,7 +2948,7 @@ index f81e95e..50fdc28 100644
        updateCounter(chatList, unreadCounter, counter, /* animated */ false);
      }
      boolean showIcon = hasIcon(chatFolderStyle) || (pagerItemId == MAIN_PAGER_ITEM_ID && pagerItemPosition == 0);
-@@ -3042,6 +3068,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3042,6 +3069,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
    }
  
    public static void updateCounter (Tdlib tdlib, TdApi.ChatList chatList, Counter target, TdlibCounter counter, boolean animated) {
@@ -2807,7 +2956,7 @@ index f81e95e..50fdc28 100644
      int mutedCount, unmutedCount;
      int badgeFlags = tdlib.settings().getChatFolderBadgeFlags();
      boolean countMessages = BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_MESSAGES);
-@@ -3053,7 +3080,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3053,7 +3081,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        unmutedCount = Math.max(0, counter.chatUnmutedCount);
      }
      if (BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED) && chatList.getConstructor() == TdApi.ChatListMain.CONSTRUCTOR) {
@@ -2816,7 +2965,7 @@ index f81e95e..50fdc28 100644
        if (countMessages) {
          mutedCount += Math.max(0, archiveCounter.messageCount);
          unmutedCount += Math.max(0, archiveCounter.messageUnmutedCount);
-@@ -3202,7 +3229,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3202,7 +3230,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
          }
          dispatchCounter(chatList, counter);
          if (chatList.getConstructor() == TdApi.ChatListArchive.CONSTRUCTOR && BitwiseUtils.hasFlag(badgeFlags, Settings.BADGE_FLAG_ARCHIVED)) {
@@ -2825,7 +2974,7 @@ index f81e95e..50fdc28 100644
          }
        });
      }
-@@ -3224,7 +3251,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
+@@ -3224,7 +3252,7 @@ public class MainController extends ViewPagerController<Void> implements Menu, M
        TdApi.ChatList chatList = pagerChatLists.get(i);
        ViewPagerTopView.Item section = pagerSections.get(i);
        if (section.counter != null) {
@@ -2835,7 +2984,7 @@ index f81e95e..50fdc28 100644
        }
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
-index 30a74d2..ace1fe1 100644
+index 30a74d2..7836a73 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SettingsController.java
 @@ -637,6 +637,12 @@ public class SettingsController extends ViewController<Void> implements
@@ -2851,6 +3000,15 @@ index 30a74d2..ace1fe1 100644
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_privacySettings, R.drawable.baseline_lock_24, R.string.PrivacySettings));
      items.add(new ListItem(ListItem.TYPE_SEPARATOR));
      items.add(new ListItem(ListItem.TYPE_SETTING, R.id.btn_stickerSettingsAndEmoji, R.drawable.deproko_baseline_stickers_filled_24, R.string.StickersAndEmoji));
+@@ -1021,7 +1027,7 @@ public class SettingsController extends ViewController<Void> implements
+   private boolean setUsername (@Nullable TdApi.User myUser) {
+     TdApi.Usernames usernames = myUser != null ? myUser.usernames : null;
+     if (myUser != null && usernames == null) {
+-      usernames = new TdApi.Usernames(new String[0], new String[0], "", new String[0]);
++      usernames = new TdApi.Usernames(new String[0], new String[0], "", new String[0], "");
+     }
+     if ((myUsernames == null && usernames != null) || (myUsernames != null && !Td.equalsTo(myUsernames, usernames))) {
+       this.myUsernames = usernames;
 @@ -1229,6 +1235,11 @@ public class SettingsController extends ViewController<Void> implements
        navigateTo(c);
      } else if (viewId == R.id.btn_chatSettings) {
@@ -3662,10 +3820,10 @@ index 0000000..18bcf28
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
 new file mode 100644
-index 0000000..9c31a40
+index 0000000..a034860
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftDetailsController.java
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,166 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -3701,8 +3859,10 @@ index 0000000..9c31a40
 +  private final Runnable changed;
 +  private final long ownerId;
 +  private SviriGiftFlow flow;
++  private SviriGiftResaleFlow resale;
 +  private DetailsAdapter adapter;
 +  private StickerSmallView sticker;
++  private SviriGiftPatternLayout heroPattern;
 +  private boolean saving, reading;
 +  public SviriGiftDetailsController(Context context, Tdlib tdlib, TdApi.ReceivedGift gift, Runnable changed) {
 +    super(context, tdlib); this.received = gift; this.changed = changed; this.ownerId = tdlib.myUserId();
@@ -3711,6 +3871,7 @@ index 0000000..9c31a40
 +  @Override public CharSequence getName() { return Lang.getString(R.string.SviriGiftDetails); }
 +  @Override protected void onCreateView(Context context, CustomRecyclerView recycler) {
 +    flow = new SviriGiftFlow(this, tdlib, () -> { changed.run(); refresh(); });
++    resale = new SviriGiftResaleFlow(this, tdlib, () -> { changed.run(); refresh(); });
 +    recycler.setLayoutManager(new LinearLayoutManager(context)); recycler.setItemAnimator(null);
 +    recycler.setPadding(Screen.dp(16), Screen.dp(12), Screen.dp(16), Screen.dp(24));
 +    adapter = new DetailsAdapter(); recycler.setAdapter(adapter); refresh();
@@ -3760,14 +3921,20 @@ index 0000000..9c31a40
 +    TextView label = text(context, Lang.getString(labelId), 14, Theme.getColor(ColorId.textLight)); label.setGravity(Gravity.START);
 +    row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 +    TextView data = text(context, value + (badge.isEmpty() ? "" : " · " + badge), 14, Theme.getColor(ColorId.text)); data.setGravity(Gravity.END);
-+    row.addView(data, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2)); wrap.addView(row);
++    row.addView(data, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2));
++    row.setPadding(Screen.dp(6), Screen.dp(2), Screen.dp(6), Screen.dp(2));
++    row.setBackgroundColor(Theme.getColor(ColorId.filling)); wrap.addView(row);
 +  }
 +  private void action(LinearLayout wrap, int label, Runnable run) {
 +    TextView button = text(wrap.getContext(), Lang.getString(label), 16, Theme.getColor(ColorId.textLink));
-+    button.setMinHeight(Screen.dp(48)); button.setOnClickListener(view -> run.run()); wrap.addView(button);
++    button.setMinHeight(Screen.dp(48));
++    GradientDrawable shape = new GradientDrawable(); shape.setColor(Theme.getColor(ColorId.filling)); shape.setCornerRadius(Screen.dp(16)); button.setBackground(shape);
++    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); layout.topMargin = Screen.dp(8);
++    button.setOnClickListener(view -> run.run()); wrap.addView(button, layout);
 +  }
 +  private void render(LinearLayout wrap) {
 +    if (sticker != null) { sticker.performDestroy(); sticker = null; }
++    if (heroPattern != null) heroPattern.destroyPattern();
 +    wrap.removeAllViews();
 +    boolean upgraded = received.gift instanceof TdApi.SentGiftUpgraded;
 +    TdApi.UpgradedGift gift = upgraded ? ((TdApi.SentGiftUpgraded) received.gift).gift : null;
@@ -3776,7 +3943,7 @@ index 0000000..9c31a40
 +    Context context = wrap.getContext();
 +    int start = Theme.getColor(ColorId.filling), end = start, foreground = Theme.getColor(ColorId.text);
 +    if (gift != null) { start = 0xff000000 | gift.backdrop.colors.centerColor; end = 0xff000000 | gift.backdrop.colors.edgeColor; foreground = 0xff000000 | gift.backdrop.colors.textColor; }
-+    LinearLayout hero = new LinearLayout(context); hero.setOrientation(LinearLayout.VERTICAL); hero.setGravity(Gravity.CENTER);
++    SviriGiftPatternLayout hero = new SviriGiftPatternLayout(context); hero.setGift(tdlib, gift); heroPattern = hero; hero.setOrientation(LinearLayout.VERTICAL); hero.setGravity(Gravity.CENTER);
 +    GradientDrawable background = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{start,end}); background.setCornerRadius(Screen.dp(24)); hero.setBackground(background);
 +    sticker = new StickerSmallView(context) { @Override public boolean onTouchEvent(android.view.MotionEvent e) { return false; } };
 +    sticker.init(tdlib); sticker.setEmojiDisabled(); sticker.setForceHeight(Screen.dp(200));
@@ -3785,7 +3952,8 @@ index 0000000..9c31a40
 +    if (object.getPreviewAnimation() != null) object.getPreviewAnimation().setIsStill(false);
 +    sticker.setSticker(object); hero.addView(sticker, new LinearLayout.LayoutParams(Screen.dp(220),Screen.dp(200)));
 +    TextView title = text(context, gift != null ? gift.title : Lang.getString(R.string.SviriReceivedGift), 25, foreground); title.setTypeface(null, Typeface.BOLD); hero.addView(title);
-+    hero.addView(text(context, gift != null ? "#" + gift.number : regular.starCount + " ★", 16, foreground)); wrap.addView(hero);
++    hero.addView(text(context, gift != null ? "#" + gift.number : regular.starCount + " ★", 16, foreground));
++    LinearLayout.LayoutParams heroLayout = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); heroLayout.bottomMargin = Screen.dp(16); wrap.addView(hero, heroLayout);
 +    row(wrap, R.string.SviriGiftOwner, tdlib.cache().userName(ownerId), "");
 +    if (!received.isPrivate && received.senderId instanceof TdApi.MessageSenderUser) row(wrap, R.string.SviriGiftFrom, tdlib.cache().userName(((TdApi.MessageSenderUser) received.senderId).userId), "");
 +    if (gift != null) {
@@ -3798,6 +3966,10 @@ index 0000000..9c31a40
 +    if (GiftSendPolicy.transferable(received, (int)(System.currentTimeMillis()/1000))) {
 +      row(wrap, R.string.SviriGiftTransferFee, received.transferStarCount + " ★", "");
 +      action(wrap, R.string.SviriGiftTransferAction, () -> flow.transfer(received));
++    }
++    if (org.thunderdog.challegram.telegram.GiftResalePolicy.eligible(received, System.currentTimeMillis()/1000L)) {
++      action(wrap, R.string.SviriGiftResale, () -> resale.start(received, false));
++      if (gift.resaleParameters != null) action(wrap, R.string.SviriGiftRemoveListing, () -> resale.start(received, true));
 +    }
 +    if (gift != null) action(wrap, R.string.SviriOpenGift, () -> tdlib.ui().openUrl(this, "https://t.me/nft/" + gift.name, null));
 +    action(wrap, R.string.SviriGiftBuy, () -> navigateTo(new SviriGiftCatalogController(context(), tdlib)));
@@ -3815,7 +3987,7 @@ index 0000000..9c31a40
 +    @Override public void onViewDetachedFromWindow(RecyclerView.ViewHolder holder) { if (sticker != null) sticker.detach(); }
 +  }
 +  @Override public void destroy() {
-+    if (flow != null) flow.destroy(); if (sticker != null) sticker.performDestroy(); sticker = null; super.destroy();
++    if (heroPattern != null) heroPattern.destroyPattern(); if (resale != null) resale.destroy(); if (flow != null) flow.destroy(); if (sticker != null) sticker.performDestroy(); sticker = null; super.destroy();
 +  }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftFlow.java
@@ -3985,12 +4157,190 @@ index 0000000..ffda35a
 +    else toast(Lang.getString(R.string.SviriGiftSending));
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
+new file mode 100644
+index 0000000..4754d6e
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
+@@ -0,0 +1,48 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.content.Context;
++import android.graphics.Canvas;
++import android.widget.LinearLayout;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.component.sticker.TGStickerObj;
++import org.thunderdog.challegram.loader.ImageReceiver;
++import org.thunderdog.challegram.loader.gif.GifReceiver;
++import org.thunderdog.challegram.loader.gif.GifFile;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.tool.Screen;
++
++/** The collectible's actual symbol, decoded once as a still frame and repeated behind its model. */
++final class SviriGiftPatternLayout extends LinearLayout {
++  private final ImageReceiver image = new ImageReceiver(this, 0);
++  private final GifReceiver animation = new GifReceiver(this);
++  private boolean patterned;
++  SviriGiftPatternLayout(Context context) { super(context); setWillNotDraw(false); setClipToOutline(true); }
++  void setGift(Tdlib tdlib, TdApi.UpgradedGift gift) {
++    patterned = gift != null;
++    if (gift == null) { image.requestFile(null); animation.requestFile(null); invalidate(); return; }
++    TdApi.Sticker symbol = gift.symbol.sticker;
++    TGStickerObj object = new TGStickerObj(tdlib, symbol, null, symbol.fullType);
++    GifFile still = object.getPreviewAnimation(); if (still != null) still.setIsStill(true);
++    image.requestFile(object.getImage()); animation.requestFile(still);
++    int color = 0xff000000 | gift.backdrop.colors.symbolColor;
++    image.setPorterDuffColorFilter(color); animation.setPorterDuffColorFilter(color);
++    image.setAlpha(.24f); animation.setAlpha(.24f); invalidate();
++  }
++  @Override protected void onDraw(Canvas canvas) {
++    super.onDraw(canvas);
++    if (!patterned) return;
++    int size = Screen.dp(getWidth() > Screen.dp(220) ? 38 : 25);
++    for (int row = 0; row < 3; row++) {
++      for (int side = 0; side < 2; side++) {
++        int left = (int)(getWidth() * (side == 0 ? .08f : .76f));
++        int top = (int)(getHeight() * (.09f + .27f * row));
++        image.setBounds(left, top, left + size, top + size); animation.setBounds(left, top, left + size, top + size);
++        if (animation.needPlaceholder()) image.draw(canvas); else animation.draw(canvas);
++      }
++    }
++  }
++  @Override protected void onAttachedToWindow() { super.onAttachedToWindow(); image.attach(); animation.attach(); }
++  @Override protected void onDetachedFromWindow() { image.detach(); animation.detach(); super.onDetachedFromWindow(); }
++  void destroyPattern() { image.destroy(); animation.destroy(); }
++}
+diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftResaleFlow.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftResaleFlow.java
+new file mode 100644
+index 0000000..f638b1a
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftResaleFlow.java
+@@ -0,0 +1,118 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.ui;
++
++import android.app.AlertDialog;
++import android.text.InputType;
++import android.widget.EditText;
++import android.widget.Toast;
++import java.util.function.Consumer;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.R;
++import org.thunderdog.challegram.core.Lang;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.navigation.ViewController;
++import org.thunderdog.challegram.telegram.GiftPaymentTask;
++import org.thunderdog.challegram.telegram.GiftResalePolicy;
++import org.thunderdog.challegram.telegram.Tdlib;
++import org.thunderdog.challegram.tool.UI;
++
++/** Listing an owned collectible; no market browsing or automatic financial retries. */
++final class SviriGiftResaleFlow {
++  private final ViewController<?> owner;
++  private final Tdlib tdlib;
++  private final Runnable changed;
++  private final long userId;
++  private AlertDialog dialog;
++  private boolean busy, closed;
++  private int generation;
++  SviriGiftResaleFlow(ViewController<?> owner, Tdlib tdlib, Runnable changed) {
++    this.owner = owner; this.tdlib = tdlib; this.changed = changed; userId = tdlib.myUserId();
++  }
++  void destroy() { closed = true; generation++; if (dialog != null) dialog.dismiss(); }
++  private boolean current() { return !closed && userId == tdlib.myUserId(); }
++  private void toast(String s) { UI.showToast(s, Toast.LENGTH_LONG); }
++  private void fail(TdApi.Object result) {
++    busy = false; generation++;
++    if (current()) toast(result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriGiftReadFailed));
++  }
++  private void read(TdApi.Function<?> request, Consumer<TdApi.Object> done) {
++    int token = generation;
++    Runnable timeout = () -> { if (current() && token == generation) fail(null); };
++    UI.post(timeout, 30000L);
++    tdlib.client().send(request, result -> UI.post(() -> {
++      UI.removePendingRunnable(timeout);
++      if (current() && token == generation) done.accept(result);
++    }));
++  }
++  void start(TdApi.ReceivedGift gift, boolean remove) {
++    if (!current() || busy || gift == null || gift.receivedGiftId == null || gift.receivedGiftId.isEmpty()) return;
++    busy = true; generation++;
++    inspect(gift.receivedGiftId, (fresh) -> {
++      if (remove) confirm(fresh, 0, 0, 0);
++      else read(new TdApi.GetOption("gift_resale_star_count_min"), lo -> {
++        if (!(lo instanceof TdApi.OptionValueInteger)) { fail(lo); return; }
++        read(new TdApi.GetOption("gift_resale_star_count_max"), hi -> {
++          if (!(hi instanceof TdApi.OptionValueInteger)) { fail(hi); return; }
++          long min = ((TdApi.OptionValueInteger)lo).value, max = ((TdApi.OptionValueInteger)hi).value;
++          if (min <= 0 || max < min) { fail(null); return; }
++          input(fresh, min, max);
++        });
++      });
++    });
++  }
++  private void inspect(String id, Consumer<TdApi.ReceivedGift> done) {
++    read(new TdApi.GetReceivedGift(id), result -> {
++      if (!(result instanceof TdApi.ReceivedGift)) { fail(result); return; }
++      TdApi.ReceivedGift gift = (TdApi.ReceivedGift)result;
++      if (!id.equals(gift.receivedGiftId) || !GiftResalePolicy.eligible(gift, System.currentTimeMillis()/1000L)) {
++        fail(new TdApi.Error(400, Lang.getString(R.string.SviriGiftResaleUnavailable))); return;
++      }
++      done.accept(gift);
++    });
++  }
++  private void input(TdApi.ReceivedGift gift, long min, long max) {
++    EditText field = new EditText(owner.context()); field.setSingleLine(true);
++    field.setInputType(InputType.TYPE_CLASS_NUMBER); field.setHint(min + " – " + max + " ★");
++    dialog = new AlertDialog.Builder(owner.context()).setTitle(R.string.SviriGiftResale)
++      .setView(field).setNegativeButton(R.string.Cancel, (d,w) -> { busy=false; generation++; })
++      .setPositiveButton(R.string.SviriGiftReviewPrice, null).create();
++    dialog.setOnCancelListener(d -> { busy=false; generation++; }); dialog.show();
++    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
++      long price = GiftResalePolicy.parseStars(field.getText().toString().trim(), min, max);
++      if (price < 0) { field.setError(min + " – " + max + " ★"); return; }
++      dialog.dismiss(); confirm(gift, price, min, max);
++    });
++  }
++  private void confirm(TdApi.ReceivedGift gift, long price, long min, long max) {
++    TdApi.UpgradedGift upgraded = ((TdApi.SentGiftUpgraded)gift.gift).gift;
++    boolean[] used = {false};
++    String detail = upgraded.title + " #" + upgraded.number + "\n\n" +
++      (price == 0 ? Lang.getString(R.string.SviriGiftRemoveListing) : Lang.getString(R.string.SviriGiftListingPrice, price)) + "\n\n" + Lang.getString(R.string.SviriGiftListingNote);
++    dialog = new AlertDialog.Builder(owner.context()).setTitle(R.string.SviriGiftResale).setMessage(detail)
++      .setNegativeButton(R.string.Cancel, (d,w) -> { busy=false; generation++; })
++      .setPositiveButton(R.string.Confirm, (d,w) -> {
++        if (used[0] || !current()) return; used[0] = true;
++        inspect(gift.receivedGiftId, fresh -> {
++          if (price == 0) write(fresh.receivedGiftId, 0);
++          else read(new TdApi.GetOption("gift_resale_star_count_min"), lo -> read(new TdApi.GetOption("gift_resale_star_count_max"), hi -> {
++            if (!(lo instanceof TdApi.OptionValueInteger) || !(hi instanceof TdApi.OptionValueInteger)
++              || GiftResalePolicy.parseStars(Long.toString(price), ((TdApi.OptionValueInteger)lo).value, ((TdApi.OptionValueInteger)hi).value) != price) {
++              fail(new TdApi.Error(400, Lang.getString(R.string.SviriGiftPriceChanged))); return;
++            }
++            write(fresh.receivedGiftId, price);
++          }));
++        });
++      }).create();
++    dialog.setOnCancelListener(d -> { busy=false; generation++; }); dialog.show();
++  }
++  private void write(String id, long price) {
++    if (!current()) { busy=false; return; }
++    TdApi.SetGiftResalePrice request = new TdApi.SetGiftResalePrice(id, price == 0 ? null : new TdApi.GiftResalePriceStar(price));
++    if (!GiftPaymentTask.send(tdlib, request, result -> {
++      busy=false; generation++;
++      if (userId != tdlib.myUserId()) return;
++      if (result instanceof TdApi.Ok) { if (current()) { toast(Lang.getString(R.string.SviriGiftListingUpdated)); changed.run(); } }
++      else if (current()) toast((result instanceof TdApi.Error ? TD.toErrorString(result) : Lang.getString(R.string.SviriUnexpectedResponse)) + "\n" + Lang.getString(R.string.SviriGiftCheckBeforeRetry));
++    })) fail(new TdApi.Error(400, Lang.getString(R.string.SviriGiftBusy)));
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
-index 0000000..cc9b333
+index 0000000..4a34195
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,302 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -4157,12 +4507,12 @@ index 0000000..cc9b333
 +  private final class Card extends RecyclerView.ViewHolder {
 +    final StickerSmallView sticker;
 +    final TextView title, subtitle;
-+    final LinearLayout panel;
++    final SviriGiftPatternLayout panel;
 +    Card (Context context) {
 +      super(column(context));
 +      LinearLayout outer = (LinearLayout) itemView;
 +      outer.setPadding(Screen.dp(5), Screen.dp(5), Screen.dp(5), Screen.dp(5));
-+      panel = column(context);
++      panel = new SviriGiftPatternLayout(context); panel.setOrientation(LinearLayout.VERTICAL); panel.setGravity(Gravity.CENTER);
 +      panel.setPadding(0, Screen.dp(6), 0, Screen.dp(8));
 +      outer.addView(panel);
 +      sticker = new StickerSmallView(context) {
@@ -4180,12 +4530,14 @@ index 0000000..cc9b333
 +      int start = Theme.getColor(ColorId.filling), end = start, foreground = Theme.getColor(ColorId.text);
 +      if (received.gift instanceof TdApi.SentGiftUpgraded) {
 +        TdApi.UpgradedGift gift = ((TdApi.SentGiftUpgraded) received.gift).gift;
++        panel.setGift(tdlib, gift);
 +        image = gift.model.sticker;
 +        start = 0xff000000 | gift.backdrop.colors.centerColor;
 +        end = 0xff000000 | gift.backdrop.colors.edgeColor;
 +        foreground = 0xff000000 | gift.backdrop.colors.textColor;
 +        title.setText(gift.title); subtitle.setText("#" + gift.number);
 +      } else {
++        panel.setGift(tdlib, null);
 +        TdApi.Gift gift = ((TdApi.SentGiftRegular) received.gift).gift;
 +        image = gift.sticker; title.setText(image.emoji + " " + Lang.getString(R.string.SviriReceivedGift));
 +        subtitle.setText(gift.starCount + " ★");
@@ -4285,7 +4637,7 @@ index 0000000..cc9b333
 +  @Override public void destroy () {
 +    generation++;
 +    tdlib.removeStarAmountListener(balanceListener);
-+    for (Card card : cards) card.sticker.performDestroy();
++    for (Card card : cards) { card.sticker.performDestroy(); card.panel.destroyPattern(); }
 +    for (AvatarView avatar : avatars) avatar.performDestroy();
 +    cards.clear(); avatars.clear();
 +    super.destroy();
@@ -4386,7 +4738,7 @@ index 98ed3d2..c28515f 100644
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..7f1d3e6 100644
+index 416f9af..f8b4eff 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -4405,7 +4757,7 @@ index 416f9af..7f1d3e6 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,86 @@
+@@ -5909,4 +5919,93 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -4491,6 +4843,13 @@ index 416f9af..7f1d3e6 100644
 +  <string name="SviriRarityEpic">Epic</string>
 +  <string name="SviriRarityLegendary">Legendary</string>
 +  <string name="SviriGiftTransferFee">Transfer fee</string>
++  <string name="SviriGiftResale">Sell collectible gift</string>
++  <string name="SviriGiftReviewPrice">Review price</string>
++  <string name="SviriGiftResaleUnavailable">This gift cannot be resold yet.</string>
++  <string name="SviriGiftRemoveListing">Remove from sale</string>
++  <string name="SviriGiftListingPrice">Listing price: %1$d Stars</string>
++  <string name="SviriGiftListingNote">Telegram applies its resale commission. This sets the buyer price, not your net proceeds. The gift stays listed until sold or removed.</string>
++  <string name="SviriGiftListingUpdated">Sale listing updated</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
@@ -4520,6 +4879,19 @@ index 0000000..7c7e1c4
 +& .\gradlew.bat assembleLatestUniversalDebug
 +if ($LASTEXITCODE -ne 0) { throw 'APK build failed; inspect the Gradle error above.' }
 +Get-ChildItem 'app/build/outputs/apk' -Recurse -Filter '*.apk' | Select-Object FullName, Length
+diff --git a/buildSrc/src/main/kotlin/tgx/gradle/task/BuildFfmpegTask.kt b/buildSrc/src/main/kotlin/tgx/gradle/task/BuildFfmpegTask.kt
+index 6c17d87..7f4b3e2 100644
+--- a/buildSrc/src/main/kotlin/tgx/gradle/task/BuildFfmpegTask.kt
++++ b/buildSrc/src/main/kotlin/tgx/gradle/task/BuildFfmpegTask.kt
+@@ -85,7 +85,7 @@ abstract class BuildFfmpegTask : BuildNativeLibraryTask() {
+           prebuilt.resolve("lib64/clang/12.0.9/lib/linux")
+         27 ->
+           prebuilt.resolve("lib/clang/18/lib/linux")
+-        29 ->
++        29, 30 ->
+           prebuilt.resolve("lib/clang/21/lib/linux")
+         else ->
+           error("Unsupported NDK version: $ndkVersion")
 diff --git a/local.properties.swiryyyyX.example b/local.properties.swiryyyyX.example
 new file mode 100644
 index 0000000..9de2c4a
@@ -4537,6 +4909,13 @@ index 0000000..9de2c4a
 +telegram.api_id=
 +telegram.api_hash=
 +tgx.extension=none
+diff --git a/tdlib b/tdlib
+index d423755..1094df0 160000
+--- a/tdlib
++++ b/tdlib
+@@ -1 +1 @@
+-Subproject commit d423755262aac19ea1e5579b3893f89c6fd208a4
++Subproject commit 1094df0caf4e5b59f6b247f8d9eb8896022cb379
 diff --git a/tests/sviri/FolderForwardLoaderTest.java b/tests/sviri/FolderForwardLoaderTest.java
 new file mode 100644
 index 0000000..e3b393a
@@ -4788,10 +5167,10 @@ index 0000000..568aa9a
 +}
 diff --git a/tests/sviri/check_folder_sender.py b/tests/sviri/check_folder_sender.py
 new file mode 100644
-index 0000000..86be2c5
+index 0000000..4627178
 --- /dev/null
 +++ b/tests/sviri/check_folder_sender.py
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,125 @@
 +#!/usr/bin/env python3
 +"""Compile the actual sender against pinned TDLib; simulate replies without sending anything."""
 +from pathlib import Path
@@ -4892,17 +5271,25 @@ index 0000000..86be2c5
 +  check(GiftSendPolicy.enoughStars(new TdApi.StarAmount(25,0),25));check(!GiftSendPolicy.enoughStars(new TdApi.StarAmount(25,-1),25));
 +  check(GiftSendPolicy.enoughStars(new TdApi.StarAmount(26,-999999999),25));check(!GiftSendPolicy.enoughStars(new TdApi.StarAmount(24,999999999),25));check(!GiftSendPolicy.enoughStars(null,0));
 +  var quote=new GiftSendPolicy.Confirmation(123,25);check(!quote.consume(456,25));check(!quote.consume(123,26));check(quote.consume(123,25));check(!quote.consume(123,25));
++  check(GiftResalePolicy.parseStars("100",1,1000)==100);
++  for (String invalid : new String[]{"-1","1.2","1e3","9223372036854775808","", " 2"}) check(GiftResalePolicy.parseStars(invalid,1,1000)==-1);
++  check(GiftResalePolicy.parseStars("1001",1,1000)==-1);check(GiftResalePolicy.parseStars("0",1,1000)==-1);
++  received.gift=new TdApi.SentGiftUpgraded();received.nextResaleDate=0;check(!GiftResalePolicy.eligible(received,100));
++  received.nextResaleDate=101;check(!GiftResalePolicy.eligible(received,100));received.nextResaleDate=100;check(GiftResalePolicy.eligible(received,100));
++  received.wasRefunded=true;check(!GiftResalePolicy.eligible(received,100));received.wasRefunded=false;
 +  Tdlib td=new Tdlib();td.account=30;List<TdApi.Object> results=new ArrayList<>();
 +  check(GiftPaymentTask.send(td,new TdApi.SendGift(),results::add));check(td.refs==1&&td.sends==1);check(!GiftPaymentTask.send(td,new TdApi.TransferGift(),results::add));
 +  var callback=td.reply;callback.onResult(new TdApi.Ok());callback.onResult(new TdApi.Ok());check(td.refs==0&&results.size()==1);
 +  check(GiftPaymentTask.send(td,new TdApi.TransferGift(),results::add));td.reply.onResult(new TdApi.Error(429,"FLOOD_WAIT_30"));check(td.refs==0&&td.sends==2&&results.size()==2);
-+  System.out.println("PASS: gift availability, ownership metadata, transfer lock, exact Stars balance, single-use price/recipient confirmation and one financial request per account");
++  check(GiftPaymentTask.send(td,new TdApi.SetGiftResalePrice("own-gift",new TdApi.GiftResalePriceStar(100)),results::add));
++  check(!GiftPaymentTask.send(td,new TdApi.TransferGift(),results::add));td.reply.onResult(new TdApi.Ok());check(td.refs==0&&td.sends==3);
++  System.out.println("PASS: resale eligibility, cooldown, integer price bounds, overflow, account write serialization; gift availability, ownership metadata, transfer lock, exact Stars balance, single-use price/recipient confirmation and one financial request per account");
 + }
 +}'''
 +with tempfile.TemporaryDirectory() as tmp:
 + temp=Path(tmp)
 + files['org/drinkless/tdlib/TdApi.java']=api.read_text()
-+ for name in ['FolderForwardSender.java','FolderForwardQueue.java','FolderForwardTask.java','GiftSendPolicy.java','GiftPaymentTask.java','MessageListener.java']:
++ for name in ['FolderForwardSender.java','FolderForwardQueue.java','FolderForwardTask.java','GiftSendPolicy.java','GiftResalePolicy.java','GiftPaymentTask.java','MessageListener.java']:
 +  files['org/thunderdog/challegram/telegram/'+name]=(root/'app/src/main/java/org/thunderdog/challegram/telegram'/name).read_text()
 + for path,content in files.items(): p=temp/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(content)
 + subprocess.run(['java','-Xmx1g','com.sun.tools.javac.Main','-d',str(temp),*[str(temp/name) for name in files]],check=True)
@@ -5327,3 +5714,16 @@ index 0000000..953918e
 +assert definitions.find('settings/default-theme/dark').text == '12'
 +print('PASS: swiryyyyX theme entries and default dark theme')
 +subprocess.run(['git', 'diff', '--check'], cwd=root, check=True)
+diff --git a/version.properties b/version.properties
+index 921f8ea..170c902 100644
+--- a/version.properties
++++ b/version.properties
+@@ -17,7 +17,7 @@ version.cmdline_tools=15859902
+ 
+ # https://developer.android.com/ndk/downloads/revision_history
+ version.cmake=3.22.1
+-version.ndk_primary=27.3.13750724
++version.ndk_primary=30.0.16248370
+ # The last release that supports android-16
+ version.ndk_legacy=23.2.8568313
+ # https://developer.android.com/studio/releases/build-tools
