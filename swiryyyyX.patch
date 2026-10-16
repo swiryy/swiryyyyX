@@ -94,6 +94,13 @@ index 0754dfb..44ccf08 100644
  )
  target_link_libraries(tdjni INTERFACE crypto ssl)
  
+diff --git a/app/jni/tgvoip/third_party/webrtc b/app/jni/tgvoip/third_party/webrtc
+index 6ecff4f..7b03082 160000
+--- a/app/jni/tgvoip/third_party/webrtc
++++ b/app/jni/tgvoip/third_party/webrtc
+@@ -1 +1 @@
+-Subproject commit 6ecff4f2446ff7d4ce38ca1c764f023e44dbcb1b
++Subproject commit 7b03082ff07aa442bcbb09ea54b8c33b4fef7e6d
 diff --git a/app/src/main/java/org/thunderdog/challegram/component/chat/MediaPreview.java b/app/src/main/java/org/thunderdog/challegram/component/chat/MediaPreview.java
 index 28c90e2..762deed 100644
 --- a/app/src/main/java/org/thunderdog/challegram/component/chat/MediaPreview.java

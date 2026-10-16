@@ -19,3 +19,7 @@ Build 25 failed in vkryl/td Kotlin helpers. Follow-up aligns tdlib-utils with up
 Also ports upstream API handling in 17 app Java files for new TON content/entity/update types. All 219 generated compile guards referenced by the app now match the selected bundle/utility definitions. New TON content uses upstream unsupported-message fallback; this is not a TON wallet implementation.
 
 Build 26 passed the Kotlin helper stage and stopped at Java compilation with two missing TON entity/link constants. The follow-up adds both upstream declarations and includes TON addresses in the selectable text entity mask. Full Android build remains unverified.
+
+Build 27 passed Java and failed in the old WebRTC candidate.h setter: Clang 21 rejects a lifetimebound attribute on a void-returning function. The next build pins the official WebRTC commit 7b03082ff07aa442bcbb09ea54b8c33b4fef7e6d used by current TGX; its setter removes that invalid annotation.
+
+Side-by-side installation: configure.py now sets ua.swiryyyyx.client.test, app.name=swiryyyyX Test and app.experimental=true. The original ua.swiryyyyx.client application stays separate. App storage, account databases, content providers, sync account type and notification services derive from the new application ID. A fresh Telegram login is required in Test. No Firebase configuration is fabricated or reused under another package name; Firebase push is unavailable for this Test package until its Android app registration is configured.
