@@ -17,3 +17,5 @@ Manual test: cold start/login, main folders and locked order, one-chat archive, 
 Build 25 failed in vkryl/td Kotlin helpers. Follow-up aligns tdlib-utils with upstream 61d4ea0b66cfdeed9352ba0a84e5746e528559d5 and adds the three upstream TON comparison types to the generator configuration. The generator retains the existing annotation API. No app feature is removed. Android compilation still pending.
 
 Also ports upstream API handling in 17 app Java files for new TON content/entity/update types. All 219 generated compile guards referenced by the app now match the selected bundle/utility definitions. New TON content uses upstream unsupported-message fallback; this is not a TON wallet implementation.
+
+Build 26 passed the Kotlin helper stage and stopped at Java compilation with two missing TON entity/link constants. The follow-up adds both upstream declarations and includes TON addresses in the selectable text entity mask. Full Android build remains unverified.
