@@ -4159,10 +4159,10 @@ index 0000000..ffda35a
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
 new file mode 100644
-index 0000000..4754d6e
+index 0000000..fba85cc
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriGiftPatternLayout.java
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,53 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -4194,16 +4194,21 @@ index 0000000..4754d6e
 +    image.setPorterDuffColorFilter(color); animation.setPorterDuffColorFilter(color);
 +    image.setAlpha(.24f); animation.setAlpha(.24f); invalidate();
 +  }
++  @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
++    super.onSizeChanged(w, h, oldw, oldh);
++    int size = Screen.dp(w > Screen.dp(220) ? 38 : 25);
++    image.setBounds(0, 0, size, size); animation.setBounds(0, 0, size, size);
++  }
 +  @Override protected void onDraw(Canvas canvas) {
 +    super.onDraw(canvas);
 +    if (!patterned) return;
-+    int size = Screen.dp(getWidth() > Screen.dp(220) ? 38 : 25);
 +    for (int row = 0; row < 3; row++) {
 +      for (int side = 0; side < 2; side++) {
 +        int left = (int)(getWidth() * (side == 0 ? .08f : .76f));
 +        int top = (int)(getHeight() * (.09f + .27f * row));
-+        image.setBounds(left, top, left + size, top + size); animation.setBounds(left, top, left + size, top + size);
++        int restore = canvas.save(); canvas.translate(left, top);
 +        if (animation.needPlaceholder()) image.draw(canvas); else animation.draw(canvas);
++        canvas.restoreToCount(restore);
 +      }
 +    }
 +  }
@@ -5369,6 +5374,48 @@ index 0000000..3ca51ef
 +        path.write_text(content)
 +    subprocess.run(['java', '-Xmx1g', 'com.sun.tools.javac.Main', '-d', str(temp), *[str(temp / name) for name in files]], check=True)
 +    subprocess.run(['java', '-cp', str(temp), 'org.thunderdog.challegram.ui.GiftFlowTest'], check=True)
+diff --git a/tests/sviri/check_gift_resale.py b/tests/sviri/check_gift_resale.py
+new file mode 100644
+index 0000000..e86a4de
+--- /dev/null
++++ b/tests/sviri/check_gift_resale.py
+@@ -0,0 +1,36 @@
++from pathlib import Path
++import runpy,tempfile,subprocess,sys,re
++r=Path(__file__).resolve().parents[2]
++sys.argv=['check',str(Path(sys.argv[1]) if len(sys.argv)>1 else r/'tdlib/src/main/java/org/drinkless/tdlib/TdApi.java')]
++base=runpy.run_path(str(r/'tests/sviri/check_gift_flow.py'));files=dict(base['files'])
++files.update({
++'android/view/View.java':'''package android.view;public class View {public interface OnClickListener{void onClick(View v);}public OnClickListener click;public void setOnClickListener(OnClickListener c){click=c;}public void tap(){if(click!=null)click.onClick(this);}}''',
++'android/text/InputType.java':'package android.text;public class InputType{public static final int TYPE_CLASS_NUMBER=2;}',
++'android/widget/EditText.java':'''package android.widget;import android.content.Context;public class EditText extends android.view.View{public static EditText last;String value="";public String error;public EditText(Context c){last=this;}public void setSingleLine(boolean b){}public void setInputType(int n){}public void setHint(String s){}public void setError(String s){error=s;}public String getText(){return value;}public void setText(String s){value=s;}}''',
++'android/app/AlertDialog.java':'''package android.app;import android.content.*;public class AlertDialog implements DialogInterface{
++public static final int BUTTON_POSITIVE=1;public static AlertDialog last;public DialogInterface.OnClickListener positive,negative;public DialogInterface.OnCancelListener cancel;android.view.View button=new android.view.View();
++public void dismiss(){}public void show(){last=this;}public void setOnCancelListener(DialogInterface.OnCancelListener c){cancel=c;}public android.view.View getButton(int n){return button;}public void confirm(){if(positive!=null)positive.onClick(this,1);else button.tap();}
++public static class Builder{AlertDialog d=new AlertDialog();public Builder(Context c){}public Builder setTitle(int t){return this;}public Builder setView(Object v){return this;}public Builder setMessage(String s){return this;}public Builder setNegativeButton(int t,DialogInterface.OnClickListener l){d.negative=l;return this;}public Builder setPositiveButton(int t,DialogInterface.OnClickListener l){d.positive=l;return this;}public Builder setPositiveButton(String t,DialogInterface.OnClickListener l){d.positive=l;return this;}public AlertDialog create(){return d;}}
++}''',
++'org/thunderdog/challegram/ui/ResaleFlowTest.java':'''package org.thunderdog.challegram.ui;import android.app.AlertDialog;import android.widget.EditText;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;import org.thunderdog.challegram.navigation.ViewController;
++public class ResaleFlowTest{
++static void check(boolean b){if(!b)throw new AssertionError();}
++static TdApi.ReceivedGift gift(){TdApi.ReceivedGift g=new TdApi.ReceivedGift();g.receivedGiftId="mine";g.nextResaleDate=1;TdApi.UpgradedGift u=new TdApi.UpgradedGift();u.title="Bunny";u.number=9;g.gift=new TdApi.SentGiftUpgraded(u);return g;}
++static void fresh(Tdlib t){check(t.lastRequest instanceof TdApi.GetReceivedGift);t.reply.onResult(gift());}
++static void limits(Tdlib t,long min,long max){check(t.lastRequest instanceof TdApi.GetOption);t.reply.onResult(new TdApi.OptionValueInteger(min));check(t.lastRequest instanceof TdApi.GetOption);t.reply.onResult(new TdApi.OptionValueInteger(max));}
++public static void main(String[] a){Tdlib t=new Tdlib();t.account=80;int[] done={0};var flow=new SviriGiftResaleFlow(new ViewController<>(),t,()->done[0]++);flow.start(gift(),false);fresh(t);limits(t,10,1000);
++EditText.last.setText("9223372036854775808");AlertDialog.last.confirm();check(EditText.last.error!=null&&!(t.lastRequest instanceof TdApi.SetGiftResalePrice));EditText.last.setText("100");AlertDialog.last.confirm();var review=AlertDialog.last;review.confirm();var pending=t.lastRequest;review.confirm();check(pending==t.lastRequest);fresh(t);limits(t,10,1000);check(t.lastRequest instanceof TdApi.SetGiftResalePrice);var set=(TdApi.SetGiftResalePrice)t.lastRequest;check(set.receivedGiftId.equals("mine")&&((TdApi.GiftResalePriceStar)set.price).starCount==100);var cb=t.reply;cb.onResult(new TdApi.Ok());cb.onResult(new TdApi.Ok());check(done[0]==1&&t.refs==0);
++flow.start(gift(),false);fresh(t);limits(t,10,1000);EditText.last.setText("100");AlertDialog.last.confirm();AlertDialog.last.confirm();fresh(t);limits(t,200,1000);check(!(t.lastRequest instanceof TdApi.SetGiftResalePrice));
++flow.start(gift(),true);fresh(t);AlertDialog.last.confirm();fresh(t);check(t.lastRequest instanceof TdApi.SetGiftResalePrice&&((TdApi.SetGiftResalePrice)t.lastRequest).price==null);t.reply.onResult(new TdApi.Ok());
++flow.start(gift(),false);flow.destroy();fresh(t);check(!(t.lastRequest instanceof TdApi.SetGiftResalePrice));
++System.out.println("PASS: resale UI overflow rejection, explicit exact-price confirmation, duplicate guard, fresh server limits, listing removal, account request cleanup and destruction");}}
++'''
++})
++code=(r/'app/src/main/java/org/thunderdog/challegram/ui/SviriGiftResaleFlow.java').read_text();files['org/thunderdog/challegram/ui/SviriGiftResaleFlow.java']=code
++resources=set(re.findall(r'R.string.(\w+)',code))|set(re.findall(r'R.string.(\w+)',base['flow']))|{'SviriFolderBusy','SviriFolderLoadFailed','SviriFolderCooldown','SviriFolderRecipientChanged','SviriFolderFinished','SviriFolderStopped'}
++files['org/thunderdog/challegram/R.java']='package org.thunderdog.challegram;public class R{public static class string{'+''.join('public static final int '+n+'='+str(i)+';' for i,n in enumerate(sorted(resources)))+'}}'
++with tempfile.TemporaryDirectory() as tmp:
++ p=Path(tmp)
++ for name,content in files.items():f=p/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(content)
++ subprocess.run(['java','-Xmx1g','com.sun.tools.javac.Main','-d',tmp,*[str(p/n) for n in files]],check=True)
++ subprocess.run(['java','-cp',tmp,'org.thunderdog.challegram.ui.ResaleFlowTest'],check=True)
 diff --git a/tests/sviri/check_slice.py b/tests/sviri/check_slice.py
 new file mode 100644
 index 0000000..bf05916
