@@ -2,9 +2,9 @@
 
 Base: known-working swiryyyyX build 24, upstream b5f81630f070d1100673029682914ff3672769b0.
 
-Latest official TGX Java/native bundle checked with git ls-remote: 1094df0caf4e5b59f6b247f8d9eb8896022cb379.
+Official TGX Java/native bundle verified on 16 October: 1094df0caf4e5b59f6b247f8d9eb8896022cb379.
 Underlying TDLib source: c15d3f5a5de6e3ba5839822c451152e5e18bb700.
-Main tdlib/td HEAD at verification was a94b83d67ab4c8397c6245e541b31a4131ea2f79, newer than the bundle. This test uses the latest available TGX bundle, not a claim to build the newest core commit.
+Main tdlib/td HEAD at verification was a94b83d67ab4c8397c6245e541b31a4131ea2f79, newer than the bundle. This test pins that verified bundle; it does not claim to use the newest core commit.
 
 Changes: NDK 30.0.16248370, platform-scoped native library/OpenSSL paths, updated Java constructors; static native collectible symbol patterns, rounded gift actions and folder selection; owned collectible listing in Stars and removal through SetGiftResalePrice; fresh server eligibility/price bounds, explicit confirmation, serialized writes, no auto financial retries.
 
@@ -43,3 +43,15 @@ Regular-gift actions revision:
 - Native gift sharing, original sender/recipient/details, collectible supply, and server-provided regular-gift backgrounds.
 - CI now executes core chat, tab mutation, gift purchase/transfer, resale and upgrade/conversion tests before the Android build.
 Local tests pass against the pinned Java API. No real purchase, transfer, conversion, upgrade or listing was executed. Full Telegram feature parity is not claimed: collections, gift messages on sending, TON marketplace/export and advanced craft/auction flows are still pending.
+
+
+24 October revision — mentions and peer profiles:
+- Settings > Mentions and replies: a compact local inbox showing group name, sender, time and message preview. Tapping opens that exact message. New Telegram-confirmed mentions/replies are collected from live updates without full-history scans.
+- Store up to 500 recent entries per account; persist across restart, deduplicate, update edited text and remove deleted messages. Hidden chats are excluded from the inbox. Viewing the list does not mark Telegram chats read.
+- Manual Refresh imports up to 20 unread mentions/replies per group from main/archive chat metadata, one request at a time; errors stop the refresh and timeouts release it. This is not a complete historical search. An account must remain a member to receive future group updates.
+- Other users' profile pages now expose their visible gifts. Foreign receipts do not expose own-gift hide, transfer, upgrade, conversion or sale controls; no other user's Stars balance is requested.
+- Account information displays only Telegram-provided registration month/year and phone-number country when available. It does not infer creation location or estimate dates from IDs.
+- Profile tab removal now removes the actual indexed tab rather than always deleting the last tab, in addition to the existing width-cache crash fix.
+Validation: core mention persistence/account isolation/edit/delete/dedup/latest-500/concurrency tests and existing chat/gift checks passed locally. Full Android compile and real-device checks are pending for this revision. Real financial actions were not executed.
+
+A newer ready-made TGX TDLib bundle was verified on 24 October: 7ec241d026ee3563e615c25a700117c2abbaea19 (core ea3f69ce11aef458bfbb09869b809ede4447486f). This revision intentionally retains the last compiled 1094df0 bundle; migration of new message/proxy/update API types is still pending. Stars invoice/paid-media checkout and full Telegram gift feature parity are not implemented by this revision.
