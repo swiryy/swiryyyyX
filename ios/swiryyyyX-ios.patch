@@ -534,10 +534,10 @@ index 5ab0a1d305..e8d157ca5c 100644
                  let scrollPosition: ChatListNodeViewScrollPosition? = first ? chatScrollPosition : nil
 diff --git a/submodules/ChatListUI/Sources/SwirixHiddenChatsController.swift b/submodules/ChatListUI/Sources/SwirixHiddenChatsController.swift
 new file mode 100644
-index 0000000000..69affc07fe
+index 0000000000..37ac3299a0
 --- /dev/null
 +++ b/submodules/ChatListUI/Sources/SwirixHiddenChatsController.swift
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,70 @@
 +import Foundation
 +import UIKit
 +import Display
@@ -582,8 +582,9 @@ index 0000000000..69affc07fe
 +        self.view.addSubview(self.table)
 +    }
 +
-+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition) {
-+        super.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, transition: transition)
++    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
++        super.containerLayoutUpdated(layout, transition: transition)
++        let navigationBarHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
 +        self.table.frame = CGRect(origin: .zero, size: layout.size)
 +        self.table.contentInset = UIEdgeInsets(top: navigationBarHeight, left: layout.safeInsets.left, bottom: layout.intrinsicInsets.bottom, right: layout.safeInsets.right)
 +        self.table.scrollIndicatorInsets = self.table.contentInset
@@ -608,7 +609,7 @@ index 0000000000..69affc07fe
 +    }
 +}
 diff --git a/submodules/ChatListUI/Sources/TabBarChatListFilterController.swift b/submodules/ChatListUI/Sources/TabBarChatListFilterController.swift
-index 1e3df440cf..a5c4c27c7f 100644
+index 1e3df440cf..e45a512872 100644
 --- a/submodules/ChatListUI/Sources/TabBarChatListFilterController.swift
 +++ b/submodules/ChatListUI/Sources/TabBarChatListFilterController.swift
 @@ -1,4 +1,5 @@
@@ -628,8 +629,8 @@ index 1e3df440cf..a5c4c27c7f 100644
 +    |> mapToSignal { originalFilters, _ -> Signal<(Int, [(ChatListFilter, Int, Bool)]), NoError> in
 +        let hidden = SwirixHiddenChats.shared.ids(account: context.account.peerId.toInt64()).map { EnginePeer.Id($0) }
 +        let filters = originalFilters.map { filter -> ChatListFilter in
-+            guard case let .filter(id, title, emoticon, data) = filter else { return filter }
-+            var data = data
++            guard case let .filter(id, title, emoticon, originalData) = filter else { return filter }
++            var data = originalData
 +            for peerId in hidden { _ = data.addExcludePeer(peerId: peerId) }
 +            return .filter(id: id, title: title, emoticon: emoticon, data: data)
 +        }
