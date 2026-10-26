@@ -1,4 +1,4 @@
-name: iOS Swiftgram simulator baseline
+name: iOS swiryyyyX experimental simulator
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ios-baseline-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   simulator:
@@ -31,8 +31,15 @@ jobs:
           test -d "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
           echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "$GITHUB_ENV"
           df -h .
-      - name: Build pinned simulator baseline
+      - name: Test and build experimental simulator port
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: python3 -u ios/ci_simulator.py
+      - name: Upload simulator application
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiryyyyX-ios-simulator
+          path: ${{ runner.temp }}/swiryyyyx-artifacts/swiryyyyX-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
