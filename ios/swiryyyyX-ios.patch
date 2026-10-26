@@ -372,7 +372,7 @@ index f2acc54165..1879548654 100644
  
                  var firstTime = previousRecentItems == nil
 diff --git a/submodules/ChatListUI/Sources/Node/ChatListNode.swift b/submodules/ChatListUI/Sources/Node/ChatListNode.swift
-index 96a933a081..1afcb5442c 100644
+index 96a933a081..e1d54aaa4e 100644
 --- a/submodules/ChatListUI/Sources/Node/ChatListNode.swift
 +++ b/submodules/ChatListUI/Sources/Node/ChatListNode.swift
 @@ -3350,6 +3350,38 @@ public final class ChatListNode: ListViewImpl {
@@ -392,7 +392,7 @@ index 96a933a081..1afcb5442c 100644
 +                    return
 +                }
 +                let peers = update.list.items.compactMap { item -> EnginePeer? in
-+                    guard !item.isPremiumRequiredToMessage, let peer = item.renderedPeer.peer, !peer.id.isRepliesOrVerificationCodes, canSendMessagesToPeer(peer), doesPeerMatchFilter(peer: peer, filter: peerFilter) else { return nil }
++                    guard !item.isPremiumRequiredToMessage, let peer = item.renderedPeer.peer, !peer.id.isRepliesOrVerificationCodes, peer.id.namespace != Namespaces.Peer.SecretChat, canSendMessagesToPeer(peer), doesPeerMatchFilter(peer: peer, filter: peerFilter) else { return nil }
 +                    return peer
 +                }
 +                guard peers.count <= self.selectionLimit else {
@@ -722,7 +722,7 @@ index 849cb5f8ea..d530ae8f00 100644
                          return true
                      } else {
 diff --git a/submodules/TelegramUI/Sources/ChatControllerForwardMessages.swift b/submodules/TelegramUI/Sources/ChatControllerForwardMessages.swift
-index 406057b8bc..48bad01900 100644
+index 406057b8bc..5acde8fe9c 100644
 --- a/submodules/TelegramUI/Sources/ChatControllerForwardMessages.swift
 +++ b/submodules/TelegramUI/Sources/ChatControllerForwardMessages.swift
 @@ -1,4 +1,5 @@
@@ -740,7 +740,7 @@ index 406057b8bc..48bad01900 100644
              let context = self.context
              attemptSelectionImpl = { [weak self, weak controller] peer, reason in
                  guard let strongSelf = self, let controller = controller else {
-@@ -187,6 +188,35 @@ extension ChatControllerImpl {
+@@ -187,6 +188,36 @@ extension ChatControllerImpl {
                                      return
                                  }
                                  
@@ -748,13 +748,14 @@ index 406057b8bc..48bad01900 100644
 +                                    let hidden = SwirixHiddenChats.shared.ids(account: context.account.peerId.toInt64())
 +                                    let recipients = targetPeersShouldDivert.filter { !hidden.contains($0.0.id.toInt64()) }
 +                                    guard !recipients.isEmpty else { return }
-+                                    let hasScheduled = recipients.contains { $0.1 }
++                                    let hasScheduled = recipients.contains { $0.1 } || result.contains { $0.attributes.contains { $0 is OutgoingScheduleInfoMessageAttribute } }
++                                    let hasUnsupported = recipients.contains { $0.0.id.namespace == Namespaces.Peer.SecretChat }
 +                                    let hasPaid = recipients.contains { entry in
 +                                        if let value = sendPaidMessageStars[entry.0.id], value != nil { return true }
 +                                        return false
 +                                    }
-+                                    guard !hasScheduled && !hasPaid else {
-+                                        strongSelf.present(textAlertController(context: context, title: "swiryyyyX", text: "Пакетне пересилання дозволено лише у безкоштовні чати без розкладу. Зміни список одержувачів.", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
++                                    guard !hasScheduled && !hasPaid && !hasUnsupported else {
++                                        strongSelf.present(textAlertController(context: context, title: "swiryyyyX", text: "Пакетне пересилання дозволено лише у безкоштовні звичайні чати без розкладу. Зміни список одержувачів.", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
 +                                        return
 +                                    }
 +                                    let names = recipients.map { $0.0.displayTitle(strings: strongSelf.updatedPresentationData.0.strings, displayOrder: strongSelf.updatedPresentationData.0.nameDisplayOrder) }
