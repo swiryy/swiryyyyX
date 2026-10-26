@@ -1,0 +1,38 @@
+name: iOS Swiftgram simulator baseline
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/tdlib-gifts-20261016]
+    paths:
+      - ios/**
+      - .github/workflows/ios-baseline.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_VERSION=$(python3 -c 'import json; print(json.load(open("ios/versions.json"))["xcode"])')
+          test -d "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "$GITHUB_ENV"
+          df -h .
+      - name: Build pinned simulator baseline
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: python3 -u ios/ci_simulator.py
