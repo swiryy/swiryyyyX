@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pinned, unmodified Swiftgram baseline for the iOS simulator only."""
+"""Build the pinned experimental swiryyyyX port; device output remains unsigned."""
 import json
 import os
 from pathlib import Path
@@ -17,6 +17,10 @@ def run(*args, cwd=None):
 
 def main():
     versions = json.loads((HERE / 'versions.json').read_text())
+    configuration = os.environ.get('SWIRIX_CONFIGURATION', 'debug_sim_arm64')
+    if configuration not in ('debug_sim_arm64', 'release_arm64'):
+        sys.exit('Unsupported build configuration')
+    device_build = configuration == 'release_arm64'
     pin = (HERE / 'UPSTREAM_COMMIT').read_text().strip()
     if not re.fullmatch(r'[0-9a-f]{40}', pin):
         sys.exit('Invalid upstream commit pin')
@@ -50,17 +54,18 @@ def main():
         str(root / 'Swiftgram/SGSimpleSettings/Sources/SwirixHiddenChats.swift'),
         str(root / 'Tests/SwirixHiddenChatsTests.swift'), '-o', str(tests))
     run(str(tests))
-    # The upstream build subcommand does not expose the provisioning switch that
-    # generateProject already supports. Enable that existing Bazel setting only
-    # for the simulator configurations; never bypass signing for device builds.
+    # Use the existing provisioning switch for simulator and unsigned device
+    # archives. Device output must be re-signed by the owner before installation.
     make_path = root / 'build-system/Make/Make.py'
     make_source = make_path.read_text()
     start = make_source.index('\ndef build(bazel, arguments):')
     anchor = '    bazel_command_line.set_configuration(arguments.configuration)'
     position = make_source.index(anchor, start)
     make_source = (make_source[:position] +
-                   "    if arguments.configuration in ('debug_sim_arm64', 'release_sim_arm64'):\n"
-                   "        bazel_command_line.set_disable_provisioning_profiles()\n\n" +
+                   "    bazel_command_line.set_disable_provisioning_profiles()\n"
+                   "    if arguments.configuration == 'release_arm64':\n"
+                   "        bazel_command_line.common_args.append('--features=disable_legacy_signing')\n"
+                   "        bazel_command_line.common_args.append('--//Telegram:disableExtensions')\n\n" +
                    make_source[position:])
     make_path.write_text(make_source)
     config = json.loads((root / 'build-system/template_minimal_development_configuration.json').read_text())
@@ -73,15 +78,29 @@ def main():
         run(sys.executable, '-u', 'build-system/Make/Make.py',
             '--cacheDir=' + str(Path(os.environ['RUNNER_TEMP']) / 'swiryyyyx-bazel-cache'),
             'build', '--configurationPath=' + str(config_path), '--xcodeManagedCodesigning',
-            '--configuration=debug_sim_arm64', '--buildNumber=' + os.environ.get('GITHUB_RUN_NUMBER', '1'),
+            '--configuration=' + configuration, '--buildNumber=' + os.environ.get('GITHUB_RUN_NUMBER', '1'),
             cwd=root)
     finally:
         config_path.unlink(missing_ok=True)
     import shutil
     artifacts = Path(os.environ['RUNNER_TEMP']) / 'swiryyyyx-artifacts'
     artifacts.mkdir()
-    shutil.copyfile(root / 'bazel-bin/Telegram/Swiftgram.ipa', artifacts / 'swiryyyyX-simulator.zip')
-    print('Experimental swiryyyyX simulator port compiled. Device signing and real iPhone validation remain pending.')
+    archive = root / 'bazel-bin/Telegram/Swiftgram.ipa'
+    if device_build:
+        import plistlib
+        import zipfile
+        with zipfile.ZipFile(archive) as package:
+            plists = [name for name in package.namelist() if name.startswith('Payload/') and name.endswith('.app/Info.plist') and name.count('/') == 2]
+            if len(plists) != 1:
+                sys.exit('Device archive has no unique application Info.plist')
+            metadata = plistlib.loads(package.read(plists[0]))
+            if metadata.get('CFBundleSupportedPlatforms') != ['iPhoneOS'] or metadata.get('CFBundleIdentifier') != 'ua.swiryyyyx.client':
+                sys.exit('Archive is not the expected swiryyyyX iPhone application')
+        shutil.copyfile(archive, artifacts / 'swiryyyyX-unsigned.ipa')
+        print('Unsigned iPhone IPA compiled; owner signing and real-device validation remain pending.')
+    else:
+        shutil.copyfile(archive, artifacts / 'swiryyyyX-simulator.zip')
+        print('Experimental simulator port compiled; this archive cannot be installed on iPhone.')
 
 
 if __name__ == '__main__':

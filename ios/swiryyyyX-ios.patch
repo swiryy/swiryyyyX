@@ -280,7 +280,7 @@ index 50025717a7..d4a0f2df70 100644
                          if !isSavedMessages, case let .user(peer) = peer, !peer.flags.contains(.isSupport), peer.botInfo == nil && !peer.isDeleted {
                              if !isContact {
 diff --git a/submodules/ChatListUI/Sources/ChatListSearchListPaneNode.swift b/submodules/ChatListUI/Sources/ChatListSearchListPaneNode.swift
-index f2acc54165..4faa92bee8 100644
+index f2acc54165..1879548654 100644
 --- a/submodules/ChatListUI/Sources/ChatListSearchListPaneNode.swift
 +++ b/submodules/ChatListUI/Sources/ChatListSearchListPaneNode.swift
 @@ -1,4 +1,5 @@
@@ -347,19 +347,43 @@ index f2acc54165..4faa92bee8 100644
                          continue loop
                      }
                      if !doesPeerMatchFilter(peer: EnginePeer(peer), filter: peersFilter) {
+@@ -4545,10 +4559,21 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
+ 
+         self.recentDisposable.set((combineLatest(queue: .mainQueue(),
+             presentationDataPromise.get(),
+-            recentItems
++            recentItems,
++            swirixHiddenChatsChanged()
+         )
+-        |> deliverOnMainQueue).startStrict(next: { [weak self] presentationData, recentItems in
++        |> deliverOnMainQueue).startStrict(next: { [weak self] presentationData, recentItems, _ in
+             if let strongSelf = self {
++                let hidden = SwirixHiddenChats.shared.ids(account: context.account.peerId.toInt64())
++                var recentItems = recentItems
++                recentItems.entries = recentItems.entries.filter { entry in
++                    switch entry.stableId {
++                    case .topPeers: return hidden.isEmpty
++                    case let .peerId(id, _): return !hidden.contains(id.toInt64())
++                    default: return true
++                    }
++                }
++                recentItems.recommendedChannelOrder.removeAll { hidden.contains($0.toInt64()) }
+                 let previousRecentItems = previousRecentItemsValue.swap(recentItems)
+ 
+                 var firstTime = previousRecentItems == nil
 diff --git a/submodules/ChatListUI/Sources/Node/ChatListNode.swift b/submodules/ChatListUI/Sources/Node/ChatListNode.swift
-index 96a933a081..2ff7f2358c 100644
+index 96a933a081..1afcb5442c 100644
 --- a/submodules/ChatListUI/Sources/Node/ChatListNode.swift
 +++ b/submodules/ChatListUI/Sources/Node/ChatListNode.swift
-@@ -3350,6 +3350,37 @@ public final class ChatListNode: ListViewImpl {
+@@ -3350,6 +3350,38 @@ public final class ChatListNode: ListViewImpl {
          }
      }
      
 +    public func swirixSelectFolder(completion: @escaping (String?) -> Void) {
 +        let _ = (self.chatListLocation.get() |> take(1) |> deliverOnMainQueue).startStandalone(next: { [weak self] location in
 +            guard let self, case let .peers(peerFilter, _, _, _, _, _, _) = self.mode else { return }
-+            guard location.filter != nil else { completion("Спочатку відкрий конкретну папку."); return }
-+            let _ = (chatListViewForLocation(chatListLocation: self.location, location: .initial(count: 1001, filter: location.filter), account: self.context.account, shouldLoadCanMessagePeer: true)
++            guard let currentFilter = location.filter, case .filter = currentFilter else { completion("Спочатку відкрий конкретну папку."); return }
++            let _ = (chatListViewForLocation(chatListLocation: self.location, location: .initial(count: 1001, filter: currentFilter), account: self.context.account, shouldLoadCanMessagePeer: true)
 +            |> filter { !$0.list.isLoading }
 +            |> take(1) |> deliverOnMainQueue).startStandalone(next: { [weak self] update in
 +                guard let self else { return }
@@ -368,7 +392,7 @@ index 96a933a081..2ff7f2358c 100644
 +                    return
 +                }
 +                let peers = update.list.items.compactMap { item -> EnginePeer? in
-+                    guard let peer = item.renderedPeer.peer, canSendMessagesToPeer(peer), doesPeerMatchFilter(peer: peer, filter: peerFilter) else { return nil }
++                    guard !item.isPremiumRequiredToMessage, let peer = item.renderedPeer.peer, !peer.id.isRepliesOrVerificationCodes, canSendMessagesToPeer(peer), doesPeerMatchFilter(peer: peer, filter: peerFilter) else { return nil }
 +                    return peer
 +                }
 +                guard peers.count <= self.selectionLimit else {
@@ -381,7 +405,8 @@ index 96a933a081..2ff7f2358c 100644
 +                    state.selectedPeerMap = Dictionary(uniqueKeysWithValues: peers.map { ($0.id, $0) })
 +                    return state
 +                }
-+                completion(nil)
++                let skipped = update.list.items.count - peers.count
++                completion(skipped > 0 ? "Вибрано \(peers.count) чатів. Пропущено \(skipped) недоступних одержувачів." : nil)
 +            })
 +        })
 +    }
@@ -408,7 +433,7 @@ index a7f3834a9f..b62cb451da 100644
                  continue
              }
 diff --git a/submodules/ChatListUI/Sources/Node/ChatListNodeLocation.swift b/submodules/ChatListUI/Sources/Node/ChatListNodeLocation.swift
-index 5ab0a1d305..c0672ec83b 100644
+index 5ab0a1d305..e8d157ca5c 100644
 --- a/submodules/ChatListUI/Sources/Node/ChatListNodeLocation.swift
 +++ b/submodules/ChatListUI/Sources/Node/ChatListNodeLocation.swift
 @@ -1,4 +1,6 @@
@@ -449,11 +474,13 @@ index 5ab0a1d305..c0672ec83b 100644
          if filter.excludeRead {
              var effectiveUnread = isUnread
              if let messageTagSummaryResult = messageTagSummaryResult, messageTagSummaryResult {
-@@ -196,17 +205,32 @@ public func chatListFilterPredicate(filter: ChatListFilterData, accountPeerId: E
+@@ -196,21 +205,37 @@ public func chatListFilterPredicate(filter: ChatListFilterData, accountPeerId: E
  }
  
  public func chatListViewForLocation(chatListLocation: ChatListControllerLocation, location: ChatListNodeLocation, account: Account, shouldLoadCanMessagePeer: Bool) -> Signal<ChatListNodeViewUpdate, NoError> {
 +    return swirixHiddenChatsChanged()
++    |> map { _ in SwirixHiddenChats.shared.ids(account: account.peerId.toInt64()) }
++    |> distinctUntilChanged
 +    |> mapToSignal { _ in
 +        return swirixChatListViewForLocation(chatListLocation: chatListLocation, location: location, account: account, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
 +    }
@@ -473,8 +500,7 @@ index 5ab0a1d305..c0672ec83b 100644
          }
          
 +        let hidden = Set(SwirixHiddenChats.shared.ids(account: accountPeerId.toInt64()).map { EnginePeer.Id($0) })
-+        if !hidden.isEmpty {
-+            var predicate = filterPredicate ?? ChatListFilterPredicate(includePeerIds: [], excludePeerIds: [], pinnedPeerIds: [], messageTagSummary: nil, includeAdditionalPeerGroupIds: [], include: { _, _, _, _, _ in true })
++        if !hidden.isEmpty, var predicate = filterPredicate {
 +            predicate.includePeerIds.subtract(hidden)
 +            predicate.excludePeerIds.formUnion(hidden)
 +            predicate.pinnedPeerIds.removeAll { hidden.contains($0) }
@@ -483,12 +509,35 @@ index 5ab0a1d305..c0672ec83b 100644
          switch location {
          case let .initial(count, _):
              let signal: Signal<(ChatListView, ViewUpdateType), NoError>
+-            signal = account.viewTracker.tailChatListView(groupId: groupId._asGroup(), filterPredicate: filterPredicate, count: count, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
++            signal = account.viewTracker.tailChatListView(groupId: groupId._asGroup(), filterPredicate: filterPredicate, count: count + (filterPredicate == nil ? hidden.count : 0), shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
+             return signal
+             |> map { view, updateType -> ChatListNodeViewUpdate in
+                 return ChatListNodeViewUpdate(list: EngineChatList(view, accountPeerId: accountPeerId), type: updateType, scrollPosition: nil)
+@@ -223,7 +248,7 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
+                 return .never()
+             }
+             var first = true
+-            return account.viewTracker.aroundChatListView(groupId: groupId._asGroup(), filterPredicate: filterPredicate, index: index, count: 80, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
++            return account.viewTracker.aroundChatListView(groupId: groupId._asGroup(), filterPredicate: filterPredicate, index: index, count: 80 + (filterPredicate == nil ? hidden.count : 0), shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
+             |> map { view, updateType -> ChatListNodeViewUpdate in
+                 let genericType: ViewUpdateType
+                 if first {
+@@ -245,7 +270,7 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
+             let directionHint: ListViewScrollToItemDirectionHint = sourceIndex > .chatList(index) ? .Down : .Up
+             let chatScrollPosition: ChatListNodeViewScrollPosition = .index(index: index, position: scrollPosition, directionHint: directionHint, animated: animated)
+             var first = true
+-            return account.viewTracker.aroundChatListView(groupId: groupId._asGroup(), filterPredicate: filterPredicate, index: index, count: 80, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
++            return account.viewTracker.aroundChatListView(groupId: groupId._asGroup(), filterPredicate: filterPredicate, index: index, count: 80 + (filterPredicate == nil ? hidden.count : 0), shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
+             |> map { view, updateType -> ChatListNodeViewUpdate in
+                 let genericType: ViewUpdateType
+                 let scrollPosition: ChatListNodeViewScrollPosition? = first ? chatScrollPosition : nil
 diff --git a/submodules/ChatListUI/Sources/SwirixHiddenChatsController.swift b/submodules/ChatListUI/Sources/SwirixHiddenChatsController.swift
 new file mode 100644
-index 0000000000..816b74c432
+index 0000000000..69affc07fe
 --- /dev/null
 +++ b/submodules/ChatListUI/Sources/SwirixHiddenChatsController.swift
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,69 @@
 +import Foundation
 +import UIKit
 +import Display
@@ -511,6 +560,8 @@ index 0000000000..816b74c432
 +        self.title = "Приховані — натисни, щоб повернути"
 +        self.table.dataSource = self
 +        self.table.delegate = self
++        self.table.contentInsetAdjustmentBehavior = .never
++        self.table.backgroundColor = data.theme.list.plainBackgroundColor
 +        self.backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
 +            self?.table.isHidden = true
 +            self?.peers.removeAll()
@@ -531,12 +582,21 @@ index 0000000000..816b74c432
 +        self.view.addSubview(self.table)
 +    }
 +
++    override func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition) {
++        super.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, transition: transition)
++        self.table.frame = CGRect(origin: .zero, size: layout.size)
++        self.table.contentInset = UIEdgeInsets(top: navigationBarHeight, left: layout.safeInsets.left, bottom: layout.intrinsicInsets.bottom, right: layout.safeInsets.right)
++        self.table.scrollIndicatorInsets = self.table.contentInset
++    }
++
 +    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { return self.peers.count }
 +
 +    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
 +        let cell = tableView.dequeueReusableCell(withIdentifier: "peer") ?? UITableViewCell(style: .default, reuseIdentifier: "peer")
 +        let data = self.context.sharedContext.currentPresentationData.with { $0 }
 +        cell.textLabel?.text = self.peers[indexPath.row].displayTitle(strings: data.strings, displayOrder: data.nameDisplayOrder)
++        cell.backgroundColor = data.theme.list.plainBackgroundColor
++        cell.textLabel?.textColor = data.theme.list.itemPrimaryTextColor
 +        cell.accessoryType = .disclosureIndicator
 +        return cell
 +    }
@@ -598,7 +658,7 @@ index 1e2b43dc77..ec5df63b50 100644
          "//submodules/Display",
          "//submodules/TelegramCore",
 diff --git a/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift b/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift
-index df6ac04903..a4e419906b 100644
+index df6ac04903..33b04d4429 100644
 --- a/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift
 +++ b/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift
 @@ -1,4 +1,5 @@
@@ -607,7 +667,7 @@ index df6ac04903..a4e419906b 100644
  import UIKit
  import SwiftSignalKit
  import Display
-@@ -471,8 +472,15 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
+@@ -471,8 +472,19 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
          }
      }
      
@@ -620,7 +680,11 @@ index df6ac04903..a4e419906b 100644
 +
      @objc private func beginSelection() {
 -        self.navigationItem.rightBarButtonItem = nil
-+        self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Уся папка", style: .plain, target: self, action: #selector(self.swirixSelectFolder))
++        if !self.forwardedMessageIds.isEmpty && self.forwardedMessageIds.allSatisfy({ $0.peerId == self.context.account.peerId }) {
++            self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Уся папка", style: .plain, target: self, action: #selector(self.swirixSelectFolder))
++        } else {
++            self.navigationItem.rightBarButtonItem = nil
++        }
          self.peerSelectionNode.beginSelection()
      }
      

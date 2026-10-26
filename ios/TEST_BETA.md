@@ -17,5 +17,7 @@ This revision requires compilation and device validation. It is not a tested pri
 
 - While any chats are hidden, the archive summary badge is suppressed to avoid leaking hidden unread activity. Folder counters and the application badge are filtered separately.
 - Other discovery surfaces, chat shortcuts, widgets, Siri and received call UI still require a privacy audit. Do not rely on experimental hiding to protect sensitive conversations until that audit and device tests pass.
-- The CI output is a simulator application. It cannot be installed on iPhone. A separate device build and an owner-selected signing method are required. The owner currently has no signing/install setup.
+- The simulator archive cannot be installed on iPhone. After the simulator job passes, a separate release arm64 job attempts to create `swiryyyyX-unsigned.ipa`. Its platform and bundle ID are checked before publishing. The IPA still requires owner signing and device validation; neither is claimed by compilation.
+- The initial device build omits app extensions and disables Siri/iCloud integrations. Widgets, system Share, broadcast upload and the notification extension are absent from this sideloading beta. Background push also needs owner-controlled provisioning and infrastructure. The simulator build retains extensions to compile-check their privacy changes.
+- The owner currently has no signing/install setup. AltStore Classic is a possible local test path, subject to its App ID and renewal limits; it is not configured by this revision.
 - Android and iOS recurring automatic forwarding remain out of scope for this patch. Android files were not modified.
