@@ -42,6 +42,19 @@ def main():
     if head != pin:
         sys.exit('Upstream checkout does not match pin')
     run('git', 'submodule', 'update', '--init', '--recursive', '--jobs', '4', cwd=root)
+    # The upstream build subcommand does not expose the provisioning switch that
+    # generateProject already supports. Enable that existing Bazel setting only
+    # for the simulator configurations; never bypass signing for device builds.
+    make_path = root / 'build-system/Make/Make.py'
+    make_source = make_path.read_text()
+    start = make_source.index('\ndef build(bazel, arguments):')
+    anchor = '    bazel_command_line.set_configuration(arguments.configuration)'
+    position = make_source.index(anchor, start)
+    make_source = (make_source[:position] +
+                   "    if arguments.configuration in ('debug_sim_arm64', 'release_sim_arm64'):\n"
+                   "        bazel_command_line.set_disable_provisioning_profiles()\n\n" +
+                   make_source[position:])
+    make_path.write_text(make_source)
     config = json.loads((root / 'build-system/template_minimal_development_configuration.json').read_text())
     config.update(bundle_id='ua.swiryyyyx.client', api_id=api_id, api_hash=api_hash,
                   team_id='', app_specific_url_scheme='swiryyyyx', sg_config='')
