@@ -42,6 +42,14 @@ def main():
     if head != pin:
         sys.exit('Upstream checkout does not match pin')
     run('git', 'submodule', 'update', '--init', '--recursive', '--jobs', '4', cwd=root)
+    patch = HERE / 'swiryyyyX-ios.patch'
+    run('git', 'apply', '--check', str(patch), cwd=root)
+    run('git', 'apply', str(patch), cwd=root)
+    tests = Path(os.environ['RUNNER_TEMP']) / 'swirix-hidden-tests'
+    run('swiftc', '-swift-version', '5',
+        str(root / 'Swiftgram/SGSimpleSettings/Sources/SwirixHiddenChats.swift'),
+        str(root / 'Tests/SwirixHiddenChatsTests.swift'), '-o', str(tests))
+    run(str(tests))
     # The upstream build subcommand does not expose the provisioning switch that
     # generateProject already supports. Enable that existing Bazel setting only
     # for the simulator configurations; never bypass signing for device builds.
@@ -69,7 +77,11 @@ def main():
             cwd=root)
     finally:
         config_path.unlink(missing_ok=True)
-    print('Pinned simulator baseline compiled. This is not an iPhone IPA or a feature-port validation.')
+    import shutil
+    artifacts = Path(os.environ['RUNNER_TEMP']) / 'swiryyyyx-artifacts'
+    artifacts.mkdir()
+    shutil.copyfile(root / 'bazel-bin/Telegram/Swiftgram.ipa', artifacts / 'swiryyyyX-simulator.zip')
+    print('Experimental swiryyyyX simulator port compiled. Device signing and real iPhone validation remain pending.')
 
 
 if __name__ == '__main__':
