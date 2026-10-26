@@ -1,4 +1,4 @@
-name: iOS swiryyyyX experimental simulator
+name: iOS swiryyyyX experimental build
 
 on:
   workflow_dispatch:
@@ -41,5 +41,33 @@ jobs:
         with:
           name: swiryyyyX-ios-simulator
           path: ${{ runner.temp }}/swiryyyyx-artifacts/swiryyyyX-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
+  device:
+    needs: simulator
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_VERSION=$(python3 -c 'import json; print(json.load(open("ios/versions.json"))["xcode"])')
+          test -d "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Build unsigned iPhone IPA
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SWIRIX_CONFIGURATION: release_arm64
+        run: python3 -u ios/ci_simulator.py
+      - name: Upload unsigned iPhone IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiryyyyX-ios-unsigned
+          path: ${{ runner.temp }}/swiryyyyx-artifacts/swiryyyyX-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
