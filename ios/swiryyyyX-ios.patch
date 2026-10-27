@@ -647,28 +647,30 @@ index 1e3df440cf..e45a512872 100644
              
              return (totalBadge, result)
 diff --git a/submodules/TelegramUI/Components/PeerSelectionController/BUILD b/submodules/TelegramUI/Components/PeerSelectionController/BUILD
-index 1e2b43dc77..ec5df63b50 100644
+index 1e2b43dc77..e73767ecdb 100644
 --- a/submodules/TelegramUI/Components/PeerSelectionController/BUILD
 +++ b/submodules/TelegramUI/Components/PeerSelectionController/BUILD
-@@ -10,6 +10,7 @@ swift_library(
+@@ -10,6 +10,8 @@ swift_library(
          "-warnings-as-errors",
      ],
      deps = [
 +        "//submodules/AlertUI",
++        "//submodules/PresentationDataUtils",
          "//submodules/SSignalKit/SwiftSignalKit",
          "//submodules/Display",
          "//submodules/TelegramCore",
 diff --git a/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift b/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift
-index df6ac04903..33b04d4429 100644
+index df6ac04903..fe13ed2a5a 100644
 --- a/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift
 +++ b/submodules/TelegramUI/Components/PeerSelectionController/Sources/PeerSelectionController.swift
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
  import Foundation
 +import AlertUI
++import PresentationDataUtils
  import UIKit
  import SwiftSignalKit
  import Display
-@@ -471,8 +472,19 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
+@@ -471,8 +473,19 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
          }
      }
      
