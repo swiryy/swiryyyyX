@@ -68,6 +68,26 @@ def main():
                    "        bazel_command_line.common_args.append('--//Telegram:disableExtensions')\n\n" +
                    make_source[position:])
     make_path.write_text(make_source)
+    if configuration == 'release_arm64':
+        # The pinned ios_application rule embeds a profile even when its
+        # existing disable_legacy_signing feature disables archive signing.
+        # Omit that embedding only for this explicitly unsigned CI archive.
+        rules_path = root / 'build-system/bazel-rules/rules_apple/apple/internal/ios_rules.bzl'
+        rules_source = rules_path.read_text()
+        profile_anchor = ("    if platform_prerequisites.platform.is_device:\n"
+                          "        processor_partials.append(\n"
+                          "            partials.provisioning_profile_partial(")
+        application_start = rules_source.index('def _ios_application_impl(')
+        application_end = rules_source.index('\ndef ', application_start + 1)
+        application_source = rules_source[application_start:application_end]
+        if application_source.count(profile_anchor) != 1:
+            sys.exit('Unsigned archive profile rule anchor changed')
+        application_source = application_source.replace(
+            profile_anchor,
+            profile_anchor.replace('platform.is_device:',
+                                   'platform.is_device and "disable_legacy_signing" not in features:'),
+            1)
+        rules_path.write_text(rules_source[:application_start] + application_source + rules_source[application_end:])
     config = json.loads((root / 'build-system/template_minimal_development_configuration.json').read_text())
     config.update(bundle_id='ua.swiryyyyx.client', api_id=api_id, api_hash=api_hash,
                   team_id='', app_specific_url_scheme='swiryyyyx', sg_config='')
