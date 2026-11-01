@@ -802,7 +802,7 @@ index 310fa4f5..343763c8 100644
        int itemIndex = 0;
 diff --git a/app/src/main/java/org/thunderdog/challegram/sync/FolderForwardWork.java b/app/src/main/java/org/thunderdog/challegram/sync/FolderForwardWork.java
 new file mode 100644
-index 00000000..82a47962
+index 00000000..cc3124eb
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/sync/FolderForwardWork.java
 @@ -0,0 +1,128 @@
@@ -833,10 +833,10 @@ index 00000000..82a47962
 +  private static String key(int account,String suffix) { return "sviri_periodic_"+account+"_"+suffix; }
 +  private static String workName(int account) { return "sviri-periodic-folder:"+account; }
 +  public static boolean enabled(int account) { return !Settings.instance().getString(key(account,"token"),"").isEmpty(); }
-+  public static String status(int account) { return Settings.instance().getString(key(account,"status"),"Not scheduled"); }
++  public static String status(int account) { return Settings.instance().getString(key(account,"status"),"Розклад не налаштовано"); }
 +  public static void pauseSchedule(int account) {
 +    Settings.instance().putString(key(account,"token"),"");
-+    Settings.instance().putString(key(account,"status"),"Paused");
++    Settings.instance().putString(key(account,"status"),"Призупинено");
 +    WorkManager.getInstance(AppContext.get()).cancelUniqueWork(workName(account));
 +  }
 +  /** Receives the exact group snapshot reviewed by the user, never adds recipients silently. */
@@ -850,7 +850,7 @@ index 00000000..82a47962
 +      .setInitialDelay(MINUTES,TimeUnit.MINUTES).setInputData(data)
 +      .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build();
 +    Settings.instance().putLong(key(tdlib.id(),"inflight"),0);
-+    Settings.instance().putString(key(tdlib.id(),"status"),"Enabled: approximately every 30 minutes; "+groups.length+" reviewed groups");
++    Settings.instance().putString(key(tdlib.id(),"status"),"Увімкнено: приблизно кожні 30 хвилин; "+groups.length+" перевірених груп");
 +    Settings.instance().putString(key(tdlib.id(),"token"),token);
 +    WorkManager.getInstance(AppContext.get()).enqueueUniquePeriodicWork(workName(tdlib.id()),ExistingPeriodicWorkPolicy.REPLACE,request);
 +  }
@@ -859,7 +859,7 @@ index 00000000..82a47962
 +    if (!completed.compareAndSet(false, true)) return;
 +    if(current()) {
 +      Settings.instance().putLong(key(accountId,"inflight"),0);
-+      Settings.instance().putString(key(accountId,"status"),error==null?"Last run completed: "+new java.util.Date():"Paused: "+error);
++      Settings.instance().putString(key(accountId,"status"),error==null?"Останній запуск завершено: "+new java.util.Date():"Призупинено: "+error);
 +      if(error!=null)Settings.instance().putString(key(accountId,"token"),"");
 +    }
 +    done.countDown();
@@ -869,33 +869,33 @@ index 00000000..82a47962
 +    long user=input.getLong("user",0);long[] groups=input.getLongArray("groups");
 +    if(accountId<0||user==0||groups==null||groups.length==0||groups.length>1000||!current())return Result.success();
 +    if(Settings.instance().getLong(key(accountId,"inflight"),0)!=0) {
-+      finish("Previous run was interrupted. Review and enable again; it will not be replayed.");return Result.success();
++      finish("Попередній запуск перервано. Переглянь список і ввімкни знову; повторного надсилання не буде.");return Result.success();
 +    }
 +    try {
 +      TdlibManager manager=TdlibManager.instanceForAccountId(accountId);
-+      if(!manager.hasAccount(accountId)||manager.account(accountId).getKnownUserId()!=user) { finish("Account changed");return Result.success(); }
++      if(!manager.hasAccount(accountId)||manager.account(accountId).getKnownUserId()!=user) { finish("Акаунт змінився");return Result.success(); }
 +      runningTdlib=manager.tdlib(accountId);Tdlib tdlib=runningTdlib;
 +      tdlib.incrementJobReferenceCount("sviri-periodic-prepare");
 +      try {
 +        tdlib.awaitInitialization(()->UI.post(()->{
 +          if(!current()){done.countDown();return;}
-+          if(!tdlib.isAuthorized()||tdlib.myUserId()!=user){finish("Sign in again to enable this schedule");return;}
++          if(!tdlib.isAuthorized()||tdlib.myUserId()!=user){finish("Увійди знову, щоб увімкнути цей розклад");return;}
 +          // Persist before any network work: process death must never replay a partially delivered run.
 +          Settings.instance().putLong(key(accountId,"inflight"),System.currentTimeMillis());
 +          tdlib.client().send(new TdApi.GetChatHistory(tdlib.selfChatId(),0,0,1,false),result->UI.post(()->{
 +            if(!current()){done.countDown();return;}
-+            if(!(result instanceof TdApi.Messages)||((TdApi.Messages)result).messages.length==0){finish("Could not fetch the newest Saved Message");return;}
++            if(!(result instanceof TdApi.Messages)||((TdApi.Messages)result).messages.length==0){finish("Не вдалося отримати останнє повідомлення зі Збереженого");return;}
 +            TdApi.Message message=((TdApi.Messages)result).messages[0];
-+            if(message==null||message.sendingState!=null||message.mediaAlbumId!=0){finish("Newest Saved Message is pending or part of an album; select a standalone message");return;}
++            if(message==null||message.sendingState!=null||message.mediaAlbumId!=0){finish("Останнє повідомлення ще надсилається або належить альбому; вибери окреме повідомлення");return;}
 +            tdlib.client().send(new TdApi.GetMessageProperties(message.chatId,message.id),properties->UI.post(()->{
 +              if(!current()){done.countDown();return;}
-+              if(!(properties instanceof TdApi.MessageProperties)||!((TdApi.MessageProperties)properties).canBeForwarded){finish("Newest Saved Message cannot be forwarded");return;}
++              if(!(properties instanceof TdApi.MessageProperties)||!((TdApi.MessageProperties)properties).canBeForwarded){finish("Останнє повідомлення зі Збереженого не можна переслати");return;}
 +              resolveRecipients(tdlib,groups,0,()->{
 +              ArrayList<FolderForwardTask.Batch> batches=new ArrayList<>();HashSet<Long> seen=new HashSet<>();
 +              for(long id:groups) {
 +                TdApi.Chat chat=tdlib.chat(id);
 +                boolean group=chat!=null&&(chat.type instanceof TdApi.ChatTypeBasicGroup||chat.type instanceof TdApi.ChatTypeSupergroup&&!((TdApi.ChatTypeSupergroup)chat.type).isChannel);
-+                if(!group||tdlib.settings().isChatHidden(id)||!tdlib.canSendBasicMessage(chat)||!seen.add(id)){finish("A reviewed recipient is unavailable. Review the folder again.");return;}
++                if(!group||tdlib.settings().isChatHidden(id)||!tdlib.canSendBasicMessage(chat)||!seen.add(id)){finish("Один з одержувачів недоступний. Переглянь папку знову.");return;}
 +                TdApi.MessageSendOptions options=new TdApi.MessageSendOptions();options.paidMessageStarCount=0;
 +                TdApi.ForwardMessages forward=new TdApi.ForwardMessages(id,null,message.chatId,new long[]{message.id},options,false,false);
 +                batches.add(new FolderForwardTask.Batch(id,Collections.singletonList(forward)));
@@ -906,11 +906,11 @@ index 00000000..82a47962
 +          }));
 +        }));
 +        if(!done.await(8,TimeUnit.MINUTES)) {
-+          UI.post(()->FolderForwardTask.cancelOwned(tdlib,this));finish("Delivery timed out. Review before enabling again.");
++          UI.post(()->FolderForwardTask.cancelOwned(tdlib,this));finish("Час надсилання вичерпано. Перевір стан перед повторним увімкненням.");
 +        }
 +      } finally { tdlib.decrementJobReferenceCount("sviri-periodic-prepare"); }
 +    }catch(InterruptedException interrupted) { Thread.currentThread().interrupt();onStopped(); }
-+    catch(RuntimeException failure) { finish("Could not run the schedule"); }
++    catch(RuntimeException failure) { finish("Не вдалося запустити розклад"); }
 +    // No retry: next periodic execution is permitted only while the saved token remains enabled.
 +    return Result.success();
 +  }
@@ -921,7 +921,7 @@ index 00000000..82a47962
 +    final int next=index+1;
 +    tdlib.client().send(new TdApi.GetChat(ids[index]),result->UI.post(()->{
 +      if(result instanceof TdApi.Chat)resolveRecipients(tdlib,ids,next,ready);
-+      else finish("Could not refresh recipient permissions. Review and enable again.");
++      else finish("Не вдалося перевірити доступ до одержувачів. Переглянь список і ввімкни знову.");
 +    }));
 +  }
 +  @Override public void onStopped() {
@@ -929,7 +929,7 @@ index 00000000..82a47962
 +    if(tdlib!=null)UI.post(()->FolderForwardTask.cancelOwned(tdlib,this));
 +    if(token!=null&&token.equals(Settings.instance().getString(key(accountId,"token"),""))) {
 +      Settings.instance().putString(key(accountId,"token"),"");
-+      Settings.instance().putString(key(accountId,"status"),"Paused after interruption; review before restarting");
++      Settings.instance().putString(key(accountId,"status"),"Призупинено після переривання; перевір перед повторним запуском");
 +    }
 +    done.countDown();
 +  }
@@ -987,10 +987,10 @@ index 00000000..7d6a11e7
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java
 new file mode 100644
-index 00000000..a25ea144
+index 00000000..a40570ca
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/FolderChatOrder.java
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,36 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.telegram;
 +
@@ -1017,6 +1017,10 @@ index 00000000..a25ea144
 +      for (long id : ranks.keySet()) ordered[i++] = id;
 +      storage.write(ordered);
 +    }
++  }
++  public synchronized void replace(long[] ids) {
++    ranks.clear(); remember(ids);
++    if (ids.length == 0) storage.write(new long[0]);
 +  }
 +  public synchronized long rank(long id) {
 +    if (!ranks.containsKey(id)) remember(new long[]{id});
@@ -1317,6 +1321,57 @@ index 00000000..6442f7af
 +    else UI.showToast(status, Toast.LENGTH_LONG);
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderSnapshot.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderSnapshot.java
+new file mode 100644
+index 00000000..db8ca766
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/FolderSnapshot.java
+@@ -0,0 +1,45 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++import java.util.*;
++import java.util.function.Consumer;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.tool.UI;
++/** Resolve explicit folders directly; rule-based folders still use complete paged membership. */
++public final class FolderSnapshot {
++  private final Tdlib tdlib;private final long user;private final int folder;
++  private final Consumer<long[]> success;private final Consumer<String> failure;
++  private boolean active=true,pumping;private int next,pending;private long[] ids;
++  private FolderForwardLoader loader;
++  public FolderSnapshot(Tdlib t,int folder,Consumer<long[]> ok,Consumer<String> error){tdlib=t;user=t.myUserId();this.folder=folder;success=ok;failure=error;}
++  private boolean current(){return active&&tdlib.myUserId()==user;}
++  public void cancel(){active=false;if(loader!=null)loader.cancel();}
++  private void fail(String reason){if(!current())return;cancel();failure.accept(reason);}
++  public void start(long[] values){timeout();resolved(values.clone());}
++  private void timeout(){UI.post(()->fail("Не вдалося завантажити папку за 60 секунд. Спробуй ще раз після підключення."),60000L);}
++  public void start(){
++    timeout();
++    tdlib.client().send(new TdApi.GetChatFolder(folder),r->UI.post(()->{
++      if(!current())return;
++      if(!(r instanceof TdApi.ChatFolder)){fail(r instanceof TdApi.Error?((TdApi.Error)r).message:"Папка недоступна");return;}
++      TdApi.ChatFolder f=(TdApi.ChatFolder)r;
++      if(!f.includeContacts&&!f.includeNonContacts&&!f.includeBots&&!f.includeGroups&&!f.includeChannels){
++        LinkedHashSet<Long> all=new LinkedHashSet<>();for(long id:f.pinnedChatIds)if(id!=0)all.add(id);for(long id:f.includedChatIds)if(id!=0)all.add(id);
++        for(long id:f.excludedChatIds)all.remove(id);resolved(all.stream().mapToLong(Long::longValue).toArray());
++      }else paged();
++    }));
++  }
++  private void paged(){TdApi.ChatList list=new TdApi.ChatListFolder(folder);
++    loader=new FolderForwardLoader(new FolderForwardLoader.Transport(){
++      public void loadMore(Consumer<Integer> cb){tdlib.client().send(new TdApi.LoadChats(list,100),r->UI.post(()->{if(current())cb.accept(r instanceof TdApi.Ok?0:r instanceof TdApi.Error?((TdApi.Error)r).code:-1);}));}
++      public void snapshot(Consumer<long[]> cb){tdlib.client().send(new TdApi.GetChats(list,FolderForwardLoader.SNAPSHOT_LIMIT),r->UI.post(()->{if(current())cb.accept(r instanceof TdApi.Chats?((TdApi.Chats)r).chatIds:null);}));}
++    },new FolderForwardLoader.Listener(){public void complete(long[] values){resolved(values);}public void failed(){fail("Не вдалося отримати повний список папки. Нічого не надіслано.");}});loader.start();
++  }
++  private void resolved(long[] values){if(!current())return;ids=values;prepare();}
++  private void prepare(){
++    if(!current()||pumping)return;pumping=true;
++    while(current()&&pending<8&&next<ids.length){long id=ids[next++];if(tdlib.chat(id)!=null)continue;pending++;
++      tdlib.client().send(new TdApi.GetChat(id),r->UI.post(()->{if(!current())return;pending--;if(!(r instanceof TdApi.Chat)){fail("Не вдалося перевірити один із чатів. Онови папку.");return;}prepare();}));
++    }pumping=false;
++    if(current()&&next==ids.length&&pending==0){active=false;success.accept(ids.clone());}
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/GiftManagePolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/GiftManagePolicy.java
 new file mode 100644
 index 00000000..1648920a
@@ -1559,10 +1614,10 @@ index 00000000..40aa8903
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/MentionInboxPolicy.java b/app/src/main/java/org/thunderdog/challegram/telegram/MentionInboxPolicy.java
 new file mode 100644
-index 00000000..9aa6b0ac
+index 00000000..e5436ea5
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/MentionInboxPolicy.java
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,17 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.telegram;
 +import org.drinkless.tdlib.TdApi;
@@ -1573,24 +1628,19 @@ index 00000000..9aa6b0ac
 +    return user==null?0:user.type instanceof TdApi.UserTypeRegular?1:2;
 +  }
 +  public static int relation(TdApi.Message message,TdApi.FormattedText text,long me,String[] usernames) {
-+    if(text!=null&&text.text!=null&&text.entities!=null)for(TdApi.TextEntity e:text.entities){
-+      if(e==null||e.type==null||e.offset<0||e.length<=0||e.offset>text.text.length()-e.length)continue;
-+      if(e.type instanceof TdApi.TextEntityTypeMentionName&&((TdApi.TextEntityTypeMentionName)e.type).userId==me)return 1;
-+      if(e.type instanceof TdApi.TextEntityTypeMention&&usernames!=null){
-+        String token=text.text.substring(e.offset,e.offset+e.length);
-+        if(token.startsWith("@"))for(String name:usernames)if(name!=null&&token.substring(1).equalsIgnoreCase(name))return 1;
-+      }
-+    }
-+    return message.containsUnreadMention&&message.replyTo instanceof TdApi.MessageReplyToMessage?2:0;
++    return message.replyTo instanceof TdApi.MessageReplyToMessage ? 2 : 0;
 +  }
-+  public static boolean humanPersonal(MentionInboxStore.Entry e){return e.senderUserId>0&&e.authorType==1&&e.relation!=0&&!e.viaBot;}
++  public static boolean repliedToMe(TdApi.Message original,long me) {
++    return original!=null&&original.senderId instanceof TdApi.MessageSenderUser&&((TdApi.MessageSenderUser)original.senderId).userId==me;
++  }
++  public static boolean humanPersonal(MentionInboxStore.Entry e){return e.senderUserId>0&&e.authorType==1&&e.relation==3&&!e.viaBot;}
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/MentionInboxStore.java b/app/src/main/java/org/thunderdog/challegram/telegram/MentionInboxStore.java
 new file mode 100644
-index 00000000..d639cc95
+index 00000000..4f971167
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/MentionInboxStore.java
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,86 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.telegram;
 +
@@ -1617,6 +1667,9 @@ index 00000000..d639cc95
 +      this.chat=clip(chat,160); this.sender=clip(sender,160); this.text=clip(text,1200); this.seen=seen;
 +    }
 +  }
++  private final java.util.concurrent.CopyOnWriteArrayList<Runnable> listeners=new java.util.concurrent.CopyOnWriteArrayList<>();
++  public void addListener(Runnable listener){listeners.addIfAbsent(listener);}
++  public void removeListener(Runnable listener){listeners.remove(listener);}
 +  private final Storage storage;
 +  private final long userId;
 +  private List<Entry> entries = new ArrayList<>();
@@ -1670,7 +1723,7 @@ index 00000000..d639cc95
 +      ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
 +      out.writeInt(2);out.writeLong(userId);out.writeInt(next.size());
 +      for(Entry e:next){out.writeLong(e.chatId);out.writeLong(e.messageId);out.writeInt(e.date);out.writeUTF(e.chat);out.writeUTF(e.sender);out.writeUTF(e.text);out.writeBoolean(e.seen);out.writeLong(e.senderUserId);out.writeInt(e.authorType);out.writeInt(e.relation);out.writeBoolean(e.viaBot);}
-+      out.flush();storage.write(bytes.toByteArray());entries=next;
++      out.flush();storage.write(bytes.toByteArray());entries=next;for(Runnable listener:listeners){try{listener.run();}catch(RuntimeException ignored){}}
 +    }catch(IOException|RuntimeException ignored){ /* Keep the last committed snapshot on a failed write. */ }
 +  }
 +}
@@ -1692,7 +1745,7 @@ index 00000000..275a5809
 +  }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
-index 11c4bfbe..b6dccd43 100644
+index 11c4bfbe..9e078a61 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 @@ -494,6 +494,69 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
@@ -1787,7 +1840,7 @@ index 11c4bfbe..b6dccd43 100644
        startupPerformed = false;
      }
      setNeedTimeZoneListener(newStatus != Status.UNKNOWN);
-@@ -1467,9 +1531,86 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -1467,9 +1531,87 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      return startupPerformed;
    }
  
@@ -1852,6 +1905,7 @@ index 11c4bfbe..b6dccd43 100644
      listeners().performStartup(startupPerformed);
 +    if (!startupPerformed) {
 +      int generation = ++priorityWarmupGeneration;
++      if (myUserId() != 0) send(new TdApi.GetChat(selfChatId()), (chat, error) -> {});
 +      long[] saved = settings().priorityChatIds();
 +      long[] ordered = new long[saved.length];
 +      int offset = 0;
@@ -1874,7 +1928,7 @@ index 11c4bfbe..b6dccd43 100644
      startupPerformed = true;
    }
  
-@@ -4833,7 +4974,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -4833,7 +4975,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        case TdApi.MessageAnimation.CONSTRUCTOR:
          return !photoVideoOnly;
        default:
@@ -1883,7 +1937,7 @@ index 11c4bfbe..b6dccd43 100644
          break;
      }
  
-@@ -4874,7 +5015,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -4874,7 +5016,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        emoji().findOrRequest(customEmojiId, (entry, inPlace) -> {
          if (entry != null && !entry.isNotFound()) {
            TdApi.Sticker customEmojiSticker = entry.value;
@@ -1892,7 +1946,7 @@ index 11c4bfbe..b6dccd43 100644
            performEdit(chatId, messageId, animatedEmoji, new TdApi.EditMessageText(chatId, messageId, null, content), pendingMessageTexts);
          } else {
            animatedEmojiFallback.run();
-@@ -4917,7 +5058,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -4917,7 +5059,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          case TdApi.MessageAnimatedEmoji.CONSTRUCTOR:
            return Td.textOrCaption(messageText);
        }
@@ -1901,13 +1955,13 @@ index 11c4bfbe..b6dccd43 100644
        throw Td.unsupported(messageText);
      }
      MessageEditMediaPending pendingEditMedia = getPendingMessageMedia(chatId, messageId);
-@@ -7515,6 +7656,33 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7515,6 +7657,61 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    }
  
 +  /** Records only Telegram-confirmed mentions/replies, never scans group history. */
 +  private MentionInboxStore.Entry mentionEntry(TdApi.Message message) {
-+    if (message == null || message.isOutgoing || !message.containsUnreadMention || myUserId() == 0) return null;
++    if (message == null || message.isOutgoing || !(message.replyTo instanceof TdApi.MessageReplyToMessage) || myUserId() == 0) return null;
 +    TdApi.Chat chat = chat(message.chatId);
 +    if (chat == null || !(chat.type instanceof TdApi.ChatTypeBasicGroup ||
 +        chat.type instanceof TdApi.ChatTypeSupergroup && !((TdApi.ChatTypeSupergroup)chat.type).isChannel)) return null;
@@ -1920,22 +1974,50 @@ index 11c4bfbe..b6dccd43 100644
 +    String text = TD.getTextFromMessage(message);
 +    if (StringUtils.isEmpty(text)) text = Lang.getString(R.string.SviriMentionMedia);
 +    return new MentionInboxStore.Entry(message.chatId, message.id, message.date,
-+      chat.title, message.senderId != null ? senderName(message.senderId) : "", text, false, senderUserId, authorType, relation, message.viaBotUserId != 0);
++      chat.title, message.senderId != null ? senderName(message.senderId) : "", text, false, senderUserId, authorType, 3, message.viaBotUserId != 0);
 +  }
++  private static final class ReplyCandidate { final TdApi.Message message;final long owner;ReplyCandidate(TdApi.Message m,long u){message=m;owner=u;} }
++  private final java.util.ArrayDeque<ReplyCandidate> replyInboxQueue = new java.util.ArrayDeque<>();
++  private final java.util.HashSet<String> replyInboxKeys = new java.util.HashSet<>();
++  private int replyInboxPending;
 +  public void rememberMention(TdApi.Message message) {
-+    MentionInboxStore.Entry entry=mentionEntry(message);
-+    if(entry!=null) settings().mentionInbox().put(entry);
++    MentionInboxStore.Entry candidate=mentionEntry(message);
++    if(candidate==null||settings().isChatHidden(message.chatId))return;
++    synchronized(replyInboxQueue) {
++      String key=myUserId()+":"+message.chatId+":"+message.id;
++      if(replyInboxQueue.size()+replyInboxPending>=500||!replyInboxKeys.add(key))return;
++      replyInboxQueue.add(new ReplyCandidate(message,myUserId()));
++    }
++    pumpReplyInbox();
++  }
++  private void pumpReplyInbox() {
++    synchronized(replyInboxQueue) {
++      while(replyInboxPending<4&&!replyInboxQueue.isEmpty()) {
++        ReplyCandidate candidate=replyInboxQueue.remove();TdApi.Message message=candidate.message;long owner=candidate.owner;
++        if(owner!=myUserId()){replyInboxKeys.remove(owner+":"+message.chatId+":"+message.id);continue;}
++        String key=owner+":"+message.chatId+":"+message.id;replyInboxPending++;
++        java.util.concurrent.atomic.AtomicBoolean finished=new java.util.concurrent.atomic.AtomicBoolean();
++        Runnable release=()->{synchronized(replyInboxQueue){replyInboxPending--;replyInboxKeys.remove(key);}pumpReplyInbox();};
++        runOnTdlibThread(()->{if(finished.compareAndSet(false,true))release.run();},15.0,false);
++        client().send(new TdApi.GetRepliedMessage(message.chatId,message.id),result->{
++          if(!finished.compareAndSet(false,true))return;
++          try {
++            if(myUserId()==owner&&result instanceof TdApi.Message&&MentionInboxPolicy.repliedToMe((TdApi.Message)result,owner)&&!settings().isChatHidden(message.chatId)) {
++              MentionInboxStore.Entry entry=mentionEntry(message);if(entry!=null)settings().mentionInbox().put(entry);
++            }
++          } finally {release.run();}
++        });
++      }
++    }
 +  }
 +  public void rememberMentions(TdApi.Message[] messages) {
-+    java.util.ArrayList<MentionInboxStore.Entry> entries=new java.util.ArrayList<>();
-+    for(TdApi.Message m:messages) { MentionInboxStore.Entry entry=mentionEntry(m);if(entry!=null)entries.add(entry); }
-+    if(!entries.isEmpty())settings().mentionInbox().putAll(entries);
++    for(TdApi.Message message:messages)rememberMention(message);
 +  }
 +
    private void updateNewMessage (TdApi.UpdateNewMessage update, boolean isUpdate) {
      if (update.message.sendingState instanceof TdApi.MessageSendingStatePending && update.message.content.getConstructor() != TdApi.MessageChatSetMessageAutoDeleteTime.CONSTRUCTOR) {
        addRemoveSendingMessage(update.message.chatId, update.message.id, true);
-@@ -7522,6 +7690,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7522,6 +7719,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          return;
      }
  
@@ -1943,7 +2025,7 @@ index 11c4bfbe..b6dccd43 100644
      listeners.updateNewMessage(update);
  
      notificationManager.onUpdateNewMessage(update);
-@@ -7589,6 +7758,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7589,6 +7787,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @TdlibThread
    private void updateMessageContent (TdApi.UpdateMessageContent update) {
@@ -1951,7 +2033,7 @@ index 11c4bfbe..b6dccd43 100644
      listeners.updateMessageContent(update);
      context.global().notifyUpdateMessageContent(this, update);
  
-@@ -7603,7 +7773,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7603,7 +7802,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          break;
        }
        default: {
@@ -1960,7 +2042,7 @@ index 11c4bfbe..b6dccd43 100644
          break;
        }
      }
-@@ -7700,6 +7870,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7700,6 +7899,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
      Arrays.sort(update.messageIds);
  
@@ -1968,7 +2050,7 @@ index 11c4bfbe..b6dccd43 100644
      listeners.updateMessagesDeleted(update);
  
      context.global().notifyUpdateMessagesDeleted(this, update);
-@@ -7778,6 +7949,8 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7778,6 +7978,8 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          chatList.onUpdateNewChat(update.chat);
        }
      }
@@ -1977,7 +2059,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    public void refreshChatState (long chatId) {
-@@ -7897,6 +8070,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7897,6 +8099,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        listChanges = setChatPositions(chat, update.positions);
      }
      listeners.updateChatLastMessage(update, listChanges);
@@ -1985,7 +2067,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    public static int CHAT_MARKED_AS_UNREAD = -1;
-@@ -8092,6 +8266,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8092,6 +8295,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      }
      if (chatListChange != null) {
        listeners.updateChatPosition(update, chatListChange);
@@ -1993,7 +2075,7 @@ index 11c4bfbe..b6dccd43 100644
      }
    }
  
-@@ -8119,6 +8294,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8119,6 +8323,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chat.chatLists = list.toArray(new TdApi.ChatList[0]);
      }
      listeners.updateChatAddedToList(update);
@@ -2001,7 +2083,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @TdlibThread
-@@ -8145,6 +8321,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8145,6 +8350,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chat.chatLists = ArrayUtils.removeElement(oldChatLists, foundIndex, new TdApi.ChatList[oldChatLists.length - 1]);
      }
      listeners.updateChatRemovedFromList(update);
@@ -2009,7 +2091,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @TdlibThread
-@@ -8337,6 +8514,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8337,6 +8543,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chatLists = chatListsImpl(chat.positions);
      }
      listeners.updateChatReadInbox(update, availabilityChanged, chat, chatLists);
@@ -2017,7 +2099,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @TdlibThread
-@@ -8477,6 +8655,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8477,6 +8684,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      }
  
      listeners.updateChatIsMarkedAsUnread(update);
@@ -2025,7 +2107,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @TdlibThread
-@@ -8845,12 +9024,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8845,12 +9053,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
      listeners.updateNotificationSettings(update);
      notificationManager.onUpdateNotificationSettings(update, chatId, oldNotificationSettings);
@@ -2040,7 +2122,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @TdlibThread
-@@ -8893,6 +9074,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8893,6 +9103,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        }
      }
      cache.onUpdateSupergroup(update, chat);
@@ -2048,7 +2130,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    // Updates: SECURITY
-@@ -9490,9 +9672,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9490,9 +9701,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      counter.messageCount = unreadMessageCount;
      counter.messageUnmutedCount = unreadUnmutedCount;
  
@@ -2061,7 +2143,7 @@ index 11c4bfbe..b6dccd43 100644
  
      return true;
    }
-@@ -9511,9 +9694,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9511,9 +9723,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      int oldTotalChatCount = counter.totalChatCount;
  
      if (counter.setChatCounters(totalCount, unreadChatCount, unreadUnmutedCount, markedAsUnreadCount, markedAsUnreadUnmutedCount)) {
@@ -2074,7 +2156,7 @@ index 11c4bfbe..b6dccd43 100644
        return true;
      }
  
-@@ -9528,7 +9712,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9528,7 +9741,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @AnyThread
    public TdlibCounter getMainCounter () {
@@ -2083,7 +2165,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @AnyThread
-@@ -9548,7 +9732,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9548,7 +9761,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @AnyThread
    public boolean hasUnreadChats (@NonNull TdApi.ChatList chatList) {
@@ -2092,7 +2174,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @AnyThread
-@@ -9574,9 +9758,52 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9574,9 +9787,52 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      // TODO ?
    }
  
@@ -2146,7 +2228,7 @@ index 11c4bfbe..b6dccd43 100644
    }
  
    @TdlibThread
-@@ -10289,6 +10516,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -10289,6 +10545,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        // Groups
        case TdApi.UpdateBasicGroup.CONSTRUCTOR: {
          cache.onUpdateBasicGroup((TdApi.UpdateBasicGroup) update);
@@ -2154,7 +2236,7 @@ index 11c4bfbe..b6dccd43 100644
          break;
        }
        case TdApi.UpdateBasicGroupFullInfo.CONSTRUCTOR: {
-@@ -10306,6 +10534,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -10306,6 +10563,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        case TdApi.UpdateSupergroupFullInfo.CONSTRUCTOR: {
          TdApi.UpdateSupergroupFullInfo updateSupergroupFullInfo = (TdApi.UpdateSupergroupFullInfo) update;
          cache.onUpdateSupergroupFull(updateSupergroupFullInfo);
@@ -2162,7 +2244,7 @@ index 11c4bfbe..b6dccd43 100644
          refreshChatState(ChatId.fromSupergroupId(updateSupergroupFullInfo.supergroupId));
          break;
        }
-@@ -10546,6 +10775,11 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -10546,6 +10804,11 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        case TdApi.UpdateStakeDiceState.CONSTRUCTOR:
        case TdApi.UpdateNewOauthRequest.CONSTRUCTOR:
        case TdApi.UpdateTextCompositionStyles.CONSTRUCTOR:
@@ -2174,7 +2256,7 @@ index 11c4bfbe..b6dccd43 100644
          break;
  
        // for bots only.
-@@ -10577,7 +10811,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -10577,7 +10840,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          throw Td.unsupported(update);
        }
        default: {
@@ -2183,7 +2265,7 @@ index 11c4bfbe..b6dccd43 100644
          throw Td.unsupported(update);
        }
      }
-@@ -11602,11 +11836,13 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -11602,11 +11865,13 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          case TdApi.MessagePollOptionDeleted.CONSTRUCTOR:
          case TdApi.MessageChatAddedToCommunity.CONSTRUCTOR:
          case TdApi.MessageChatRemovedFromCommunity.CONSTRUCTOR:
@@ -2198,7 +2280,7 @@ index 11c4bfbe..b6dccd43 100644
            throw Td.unsupported(message.content);
        }
      }
-@@ -12028,7 +12264,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -12028,7 +12293,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          return true;
        }
        default: {
@@ -2207,7 +2289,7 @@ index 11c4bfbe..b6dccd43 100644
          break;
        }
      }
-@@ -12125,7 +12361,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -12125,7 +12390,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          case TdApi.SuggestedActionSetLoginEmailAddress.CONSTRUCTOR:
            return ResolvableProblem.SET_LOGIN_EMAIL;
          default:
@@ -2340,10 +2422,10 @@ index 45bf7fd3..6d43b89a 100644
        if (!onLoadMore.isEmpty()) {
          List<Runnable> callbacks = new ArrayList<>(onLoadMore);
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
-index 7226964a..f0c27d4b 100644
+index 7226964a..a5103480 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibChatListSlice.java
-@@ -49,10 +49,17 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -49,16 +49,24 @@ public final class TdlibChatListSlice implements Destroyable {
    private RunnableData<List<Entry>> subCallback;
    private int maxSize;
    private int displayCount;
@@ -2361,17 +2443,25 @@ index 7226964a..f0c27d4b 100644
  
      public Entry (TdApi.Chat chat, TdApi.ChatList chatList, TdApi.ChatPosition position, boolean keepPosition) {
        super(chat, chatList, position);
-@@ -66,6 +73,9 @@ public final class TdlibChatListSlice implements Destroyable {
+       this.keepPosition = keepPosition;
+     }
+ 
++    private boolean savedMessages;
+     public void bringToTop () {
+       this.broughtToTopTime = SystemClock.uptimeMillis();
+       this.keepPosition = true;
+@@ -66,6 +74,10 @@ public final class TdlibChatListSlice implements Destroyable {
  
      @Override
      public int compareTo (TdlibChatList.Entry other) {
++      if (other instanceof Entry && savedMessages != ((Entry)other).savedMessages) return savedMessages ? -1 : 1;
 +      if (folderRank >= 0 && other instanceof Entry && ((Entry) other).folderRank >= 0) {
 +        return Long.compare(folderRank, ((Entry) other).folderRank);
 +      }
        long otherTime = other instanceof Entry ? ((Entry) other).broughtToTopTime : 0;
        if (this.broughtToTopTime != otherTime) {
          return Long.compare(otherTime, this.broughtToTopTime);
-@@ -77,10 +87,35 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -77,10 +89,36 @@ public final class TdlibChatListSlice implements Destroyable {
    TdlibChatListSlice (Tdlib tdlib, TdlibChatList chatList, Filter<TdApi.Chat> filter, boolean keepPositions, @Nullable Modifier modifier) {
      this.tdlib = tdlib;
      this.sourceList = chatList;
@@ -2380,12 +2470,13 @@ index 7226964a..f0c27d4b 100644
      this.keepPositions = keepPositions;
      this.haveCustomModifications = keepPositions;
      this.modifier = modifier;
-+    this.folderId = chatList.chatList() instanceof TdApi.ChatListFolder ? ((TdApi.ChatListFolder) chatList.chatList()).chatFolderId : 0;
-+    this.fixedOrder = folderId > 0 && tdlib.settings().isFolderOrderFixed(folderId);
++    this.folderId = chatList.chatList() instanceof TdApi.ChatListFolder ? ((TdApi.ChatListFolder) chatList.chatList()).chatFolderId : chatList.chatList() instanceof TdApi.ChatListArchive ? -1 : 0;
++    this.fixedOrder = tdlib.settings().isFolderOrderFixed(folderId);
 +  }
 +
 +  private Entry makeEntry(TdApi.Chat chat, TdApi.ChatList list, TdApi.ChatPosition position) {
 +    Entry entry = new Entry(chat, list, position, keepPositions);
++    entry.savedMessages = chat.id == tdlib.selfChatId();
 +    if (fixedOrder) entry.folderRank = tdlib.settings().folderChatOrder(folderId).rank(chat.id);
 +    return entry;
 +  }
@@ -2408,15 +2499,15 @@ index 7226964a..f0c27d4b 100644
    }
  
    private int loadedCount () {
-@@ -144,6 +179,7 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -144,6 +182,7 @@ public final class TdlibChatListSlice implements Destroyable {
      if (this.listener != null)
        throw new IllegalStateException();
  
-+    fixedOrder = folderId > 0 && tdlib.settings().isFolderOrderFixed(folderId);
++    fixedOrder = tdlib.settings().isFolderOrderFixed(folderId);
      this.subListener = subListener;
      this.listener = new ChatListListener() {
        @Override
-@@ -165,7 +201,7 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -165,7 +204,7 @@ public final class TdlibChatListSlice implements Destroyable {
            if (!filter.accept(chat))
              return;
          }
@@ -2425,7 +2516,7 @@ index 7226964a..f0c27d4b 100644
          final int insertIndex;
          try {
            if (needSort()) {
-@@ -261,11 +297,21 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -261,11 +300,21 @@ public final class TdlibChatListSlice implements Destroyable {
        public void onChatListItemChanged (TdlibChatList chatList, TdApi.Chat chat, int changeType) {
          ensureTdlibThreadAndList(chatList);
          final int existingIndex = indexOfChat(chat.id);
@@ -2448,7 +2539,7 @@ index 7226964a..f0c27d4b 100644
                int atIndex = findInsertIndex(entry);
                if (atIndex == filteredList.size()) {
                  filteredList.add(entry);
-@@ -273,9 +319,13 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -273,9 +322,13 @@ public final class TdlibChatListSlice implements Destroyable {
                  return;
                }
                filteredList.add(atIndex, entry);
@@ -2465,7 +2556,7 @@ index 7226964a..f0c27d4b 100644
              }
            }
            return; // do nothing, as chat is not from this list
-@@ -291,18 +341,31 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -291,18 +344,38 @@ public final class TdlibChatListSlice implements Destroyable {
      this.subCallback = subCallback;
      final RunnableData<List<TdlibChatList.Entry>> callback = (moreChats) -> {
        tdlib.ensureTdlibThread();
@@ -2477,6 +2568,13 @@ index 7226964a..f0c27d4b 100644
 +          tdlib.settings().folderChatOrder(folderId).remember(ids);
 +        }
          List<Entry> addedEntries = new ArrayList<>(moreChats.size());
++        // Saved can be cached while outside the first loaded page. Keep its list membership/filter.
++        TdApi.Chat saved = tdlib.chat(tdlib.selfChatId());
++        TdApi.ChatPosition savedPosition = saved != null ? ChatPosition.findPosition(saved, sourceList.chatList()) : null;
++        if (loadingInitialChunk && savedPosition != null && savedPosition.order != 0 && filter.accept(saved) && moreChats.stream().noneMatch(e -> e.chat.id == saved.id)) {
++          addedEntries.add(makeEntry(saved, sourceList.chatList(), savedPosition));
++          this.haveCustomModifications = true;
++        }
          for (TdlibChatList.Entry entry : moreChats) {
            if ((filter == null || filter.accept(entry.chat)) && (!haveCustomModifications || indexOfChat(entry.chat.id) == -1)) {
 -            addedEntries.add(new Entry(entry.chat, entry.chatList, entry.effectivePosition, keepPositions));
@@ -2494,11 +2592,11 @@ index 7226964a..f0c27d4b 100644
 +        }
          boolean haveCustomModifications = modifier != null && modifier.modifySlice(this, addedEntries, filteredList.size());
          filteredList.addAll(addedEntries);
-+        if (fixedOrder) Collections.sort(filteredList);
++        Collections.sort(filteredList);
          if (haveCustomModifications) {
            this.haveCustomModifications = true;
          }
-@@ -311,8 +374,11 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -311,8 +384,11 @@ public final class TdlibChatListSlice implements Destroyable {
      };
  
      loadingInitialChunk = true;
@@ -2511,7 +2609,7 @@ index 7226964a..f0c27d4b 100644
        dispatchChats(0);
        if (!isDestroyed() && onLoadInitialChunk != null) {
          onLoadInitialChunk.run();
-@@ -320,6 +386,16 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -320,6 +396,16 @@ public final class TdlibChatListSlice implements Destroyable {
      });
    }
  
@@ -2528,7 +2626,7 @@ index 7226964a..f0c27d4b 100644
    private boolean loadingInitialChunk;
  
    private boolean isSuspended () {
-@@ -349,33 +425,49 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -349,33 +435,49 @@ public final class TdlibChatListSlice implements Destroyable {
      return notifyCount;
    }
  
@@ -2590,7 +2688,7 @@ index 7226964a..f0c27d4b 100644
      }
    }
  
-@@ -393,6 +485,10 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -393,6 +495,10 @@ public final class TdlibChatListSlice implements Destroyable {
        if (isDestroyed()) {
          return;
        }
@@ -2601,7 +2699,7 @@ index 7226964a..f0c27d4b 100644
        final int fromIndex = indexOfChat(chatId);
        if (fromIndex != -1) {
          /*if (fromIndex == 0) // No need to do anything
-@@ -418,7 +514,7 @@ public final class TdlibChatListSlice implements Destroyable {
+@@ -418,7 +524,7 @@ public final class TdlibChatListSlice implements Destroyable {
            return;
          haveCustomModifications = true;
          // Force add item to top
@@ -2747,10 +2845,10 @@ index b789b706..7d3aca9f 100644
      String localKey = "tgx_ns_" + tdlib.id() + "_" + localChatId;
      IconCompat chatIcon = U.isValidBitmap(icon) ? IconCompat.createWithBitmap(icon) : null;
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-index ba920829..7525b3e3 100644
+index ba920829..95ef0d04 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibSettingsManager.java
-@@ -127,10 +127,171 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -127,10 +127,183 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      this.tdlib = tdlib;
  
      load();
@@ -2832,7 +2930,12 @@ index ba920829..7525b3e3 100644
 +  private final java.util.concurrent.CopyOnWriteArrayList<FolderOrderListener> folderOrderListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
 +  public interface FolderOrderListener { void onFolderOrderChanged(int folderId); }
 +  public boolean isFolderOrderFixed(int folderId) {
-+    return folderId > 0 && Settings.instance().getBoolean(key(FOLDER_ORDER_PREFIX, tdlib.id()) + folderId + "_enabled", false);
++    String prefix = key(FOLDER_ORDER_PREFIX, tdlib.id()) + folderId;
++    if (!Settings.instance().getBoolean(prefix + "_fixed_v2", false)) {
++      Settings.instance().putBoolean(prefix + "_enabled", true);
++      Settings.instance().putBoolean(prefix + "_fixed_v2", true);
++    }
++    return Settings.instance().getBoolean(prefix + "_enabled", true);
 +  }
 +  public synchronized FolderChatOrder folderChatOrder(int folderId) {
 +    FolderChatOrder order = folderOrders.get(folderId);
@@ -2847,17 +2950,24 @@ index ba920829..7525b3e3 100644
 +    return order;
 +  }
 +  public void setFolderOrderFixed(int folderId, boolean fixed) {
-+    if (folderId <= 0) return;
 +    tdlib.runOnTdlibThread(() -> {
 +      if (isFolderOrderFixed(folderId) == fixed) return;
 +      if (fixed) {
-+        java.util.List<TdlibChatList.Entry> entries = tdlib.chatList(new TdApi.ChatListFolder(folderId)).listCopy(null);
++        java.util.List<TdlibChatList.Entry> entries = tdlib.chatList(orderChatList(folderId)).listCopy(null);
 +        long[] ids = new long[entries.size()];
 +        for (int i = 0; i < ids.length; i++) ids[i] = entries.get(i).chat.id;
 +        folderChatOrder(folderId).remember(ids);
 +      }
 +      Settings.instance().putBoolean(key(FOLDER_ORDER_PREFIX, tdlib.id()) + folderId + "_enabled", fixed);
 +      for (FolderOrderListener listener : folderOrderListeners) listener.onFolderOrderChanged(folderId);
++    });
++  }
++  public static TdApi.ChatList orderChatList(int id) { return id > 0 ? new TdApi.ChatListFolder(id) : id == -1 ? new TdApi.ChatListArchive() : new TdApi.ChatListMain(); }
++  public void replaceChatOrder(int id,long[] ordered) {
++    tdlib.runOnTdlibThread(()->{
++      folderChatOrder(id).replace(ordered);
++      Settings.instance().putBoolean(key(FOLDER_ORDER_PREFIX,tdlib.id())+id+"_enabled",true);
++      for(FolderOrderListener listener:folderOrderListeners)listener.onFolderOrderChanged(id);
 +    });
 +  }
 +  public void addFolderOrderListener(FolderOrderListener listener) { folderOrderListeners.addIfAbsent(listener); }
@@ -2922,7 +3032,7 @@ index ba920829..7525b3e3 100644
    private void load () {
      // FIXME
    }
-@@ -147,6 +308,7 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -147,6 +320,7 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
  
    @Override
    public void onPerformUserCleanup () {
@@ -2930,7 +3040,7 @@ index ba920829..7525b3e3 100644
      Settings prefs = Settings.instance();
  
      SharedPreferences.Editor editor = prefs.edit();
-@@ -158,6 +320,14 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -158,6 +332,14 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      editor.remove(key(THEME_CHAT_STYLE_KEY, accountId));
      editor.remove(key(PLAIN_CHANNEL_KEY, accountId));
      editor.remove(key(PREFERENCES_KEY, accountId));
@@ -2945,7 +3055,7 @@ index ba920829..7525b3e3 100644
      editor.remove(key(THEME_GLOBAL_THEME_KEY, accountId));
      editor.remove(key(THEME_GLOBAL_THEME_NIGHT_KEY, accountId));
      editor.remove(key(THEME_GLOBAL_THEME_DAYLIGHT_KEY, accountId));
-@@ -187,7 +357,8 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -187,7 +369,8 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
        notificationDataPrefix,
        conversionPrefix,
        localChatIdPrefix,
@@ -2955,19 +3065,18 @@ index ba920829..7525b3e3 100644
      }, editor);
      editor.apply();
  
-@@ -288,9 +459,22 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -288,9 +471,21 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
      return pendingInfo == null || Arrays.equals(Settings.instance().getLongArray(key(DISMISS_REQUESTS_PREFIX, tdlib.id()) + chatId), pendingInfo.userIds);
    }
  
 +  private void migrateTelegramPresentation () {
 +    SharedPreferences prefs = Settings.instance().pmc();
-+    String migrationKey = key("sviri_telegram_presentation_v1", tdlib.id());
++    String migrationKey = key("sviri_original_presentation_v2", tdlib.id());
 +    if (!prefs.getBoolean(migrationKey, false)) {
-+      prefs.edit().putBoolean(key(PLAIN_CHANNEL_KEY, tdlib.id()), false)
-+        .putInt(key(THEME_CHAT_STYLE_KEY, tdlib.id()), ThemeManager.CHAT_STYLE_BUBBLES)
++      prefs.edit().putBoolean(key(PLAIN_CHANNEL_KEY, tdlib.id()), true)
++        .putInt(key(THEME_CHAT_STYLE_KEY, tdlib.id()), ThemeManager.CHAT_STYLE_MODERN)
 +        .putBoolean(migrationKey, true).apply();
-+      _forcePlainModeInChannels = false;
-+      _chatStyle = ThemeManager.CHAT_STYLE_BUBBLES;
++      _forcePlainModeInChannels = true; _chatStyle = ThemeManager.CHAT_STYLE_MODERN;
 +    }
 +  }
 +
@@ -2979,7 +3088,7 @@ index ba920829..7525b3e3 100644
      return _forcePlainModeInChannels;
    }
  
-@@ -509,6 +693,7 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -509,6 +704,7 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
  
    @ChatStyle
    public int chatStyle () {
@@ -2987,7 +3096,7 @@ index ba920829..7525b3e3 100644
      if (_chatStyle == null) {
        final int accountId = tdlib.id();
        SharedPreferences prefs = Settings.instance().pmc();
-@@ -1186,6 +1371,9 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
+@@ -1186,6 +1382,9 @@ public class TdlibSettingsManager implements CleanupStartupDelegate {
  
    public void forgetChatFolder (int chatFolderId) {
      setChatFolderEnabled(chatFolderId, true); // Reset to default
@@ -4340,14 +4449,14 @@ index 00000000..0097add3
 +  @Override public void destroy () { generation++; tdlib.removeStarAmountListener(balanceListener); super.destroy(); }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
-index 606de788..88daa4f9 100644
+index 606de788..6a1d13e8 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 @@ -78,6 +78,8 @@ import org.thunderdog.challegram.navigation.ViewController;
  import org.thunderdog.challegram.support.RippleSupport;
  import org.thunderdog.challegram.support.ViewSupport;
  import org.thunderdog.challegram.telegram.ChatListListener;
-+import org.thunderdog.challegram.telegram.FolderForwardLoader;
++import org.thunderdog.challegram.telegram.FolderSnapshot;
 +import org.thunderdog.challegram.telegram.FolderForwardTask;
  import org.thunderdog.challegram.telegram.RightId;
  import org.thunderdog.challegram.telegram.TGLegacyManager;
@@ -4589,7 +4698,7 @@ index 606de788..88daa4f9 100644
      if (functions.size() == 1) {
        tdlib.client().send(functions.get(0), tdlib.messageHandler());
      } else {
-@@ -3660,6 +3706,171 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3660,6 +3706,151 @@ public class ShareController extends TelegramViewController<ShareController.Args
      }
    }
  
@@ -4605,7 +4714,7 @@ index 606de788..88daa4f9 100644
 +
 +  private boolean folderForwardReview;
 +  private int folderForwardGeneration;
-+  private FolderForwardLoader folderForwardLoader;
++  private FolderSnapshot folderForwardLoader;
 +
 +  private boolean canForwardSavedToFolder () {
 +    if (mode != MODE_MESSAGES || tdlib.chatFolderCount() == 0) return false;
@@ -4656,37 +4765,20 @@ index 606de788..88daa4f9 100644
 +    if (headerView != null) headerView.updateCustomButton(getMenuId(), R.id.menu_btn_sviriForwardFolder, view -> {
 +      if (view instanceof HeaderButton) ((HeaderButton) view).setShowProgress(true, 0f);
 +    });
-+    folderForwardLoader = new FolderForwardLoader(new FolderForwardLoader.Transport() {
-+      @Override public void loadMore (java.util.function.Consumer<Integer> callback) {
-+        tdlib.client().send(new TdApi.LoadChats(list, 100), result -> runOnUiThreadOptional(() -> {
-+          callback.accept(result instanceof TdApi.Ok ? 0 : result instanceof TdApi.Error ? ((TdApi.Error) result).code : -1);
-+        }));
-+      }
-+      @Override public void snapshot (java.util.function.Consumer<long[]> callback) {
-+        tdlib.client().send(new TdApi.GetChats(list, FolderForwardLoader.SNAPSHOT_LIMIT), result -> runOnUiThreadOptional(() -> {
-+          callback.accept(result instanceof TdApi.Chats ? ((TdApi.Chats) result).chatIds : null);
-+        }));
-+      }
-+    }, new FolderForwardLoader.Listener() {
-+      @Override public void complete (long[] ids) {
-+        if (currentFolderForward(token)) reloadMessageProperties(ignored -> {
-+          if (!currentFolderForward(token)) return;
-+          if (messageProperties == null || messageProperties.length != getArgumentsStrict().messages.length) {
-+            folderForwardGeneration++; finishFolderLoading();
-+            UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG); return;
-+          }
-+          for (TdApi.MessageProperties properties : messageProperties) if (properties == null) {
-+            folderForwardGeneration++; finishFolderLoading();
-+            UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG); return;
-+          }
-+          new FolderRecipients(info, list, ids, token).prepare();
-+        });
-+      }
-+      @Override public void failed () {
++    folderForwardLoader = new FolderSnapshot(tdlib, info.id, ids -> {
++      if (currentFolderForward(token)) reloadMessageProperties(ignored -> {
 +        if (!currentFolderForward(token)) return;
-+        folderForwardGeneration++; finishFolderLoading();
-+        UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG);
-+      }
++        if (messageProperties == null || messageProperties.length != getArgumentsStrict().messages.length) {
++          folderForwardGeneration++; finishFolderLoading(); UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG); return;
++        }
++        for (TdApi.MessageProperties properties : messageProperties) if (properties == null) {
++          folderForwardGeneration++; finishFolderLoading(); UI.showToast(Lang.getString(R.string.SviriFolderLoadFailed), Toast.LENGTH_LONG); return;
++        }
++        new FolderRecipients(info, list, ids, token).prepare();
++      });
++    }, error -> {
++      if (!currentFolderForward(token)) return;
++      folderForwardGeneration++; finishFolderLoading(); UI.showToast(error, Toast.LENGTH_LONG);
 +    });
 +    folderForwardLoader.start();
 +    UI.post(() -> {
@@ -4714,10 +4806,7 @@ index 606de788..88daa4f9 100644
 +      while (pending < 4 && next < ids.length && currentFolderForward(token)) {
 +        long id = ids[next++]; TdApi.Chat chat = tdlib.chat(id);
 +        if (chat == null || tdlib.settings().isChatHidden(id) || !accept(chat)) { unavailable.add(id); continue; }
-+        if (ChatId.isSupergroup(id)) {
-+          pending++;
-+          tdlib.cache().supergroupFull(ChatId.toSupergroupId(id), value -> runOnUiThreadOptional(() -> ready(id, value != null)));
-+        } else if (ChatId.isUserChat(id) && hasVoiceOrVideoMessageContent()) {
++        if (ChatId.isUserChat(id) && hasVoiceOrVideoMessageContent()) {
 +          pending++;
 +          tdlib.cache().userFull(tdlib.chatUserId(id), value -> runOnUiThreadOptional(() -> ready(id, value != null)));
 +        }
@@ -4761,7 +4850,7 @@ index 606de788..88daa4f9 100644
    private @Nullable PopupLayout folderSelectorLayout;
  
    private static class FolderMenuWrap extends MenuMoreWrap {
-@@ -3682,6 +3893,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3682,6 +3873,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void showFolderSelector () {
@@ -4769,7 +4858,7 @@ index 606de788..88daa4f9 100644
      if (headerView == null)
        return;
      FolderMenuWrap menu = new FolderMenuWrap(context);
-@@ -3720,6 +3932,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3720,6 +3912,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    @Override
    public void destroy () {
@@ -4781,10 +4870,10 @@ index 606de788..88daa4f9 100644
        list.performDestroy();
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriFolderToolsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriFolderToolsController.java
 new file mode 100644
-index 00000000..b2ade95c
+index 00000000..974ebfe9
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriFolderToolsController.java
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,169 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -4812,7 +4901,8 @@ index 00000000..b2ade95c
 +  private final long user;
 +  private int generation;
 +  private boolean loading;
-+  private FolderForwardLoader loader;
++  private String progress="Папки та автопересилання";
++  private FolderSnapshot loader;
 +  private Adapter adapter;
 +  private String reviewHeader;
 +  private final ArrayList<String> reviewNames = new ArrayList<>();
@@ -4824,54 +4914,51 @@ index 00000000..b2ade95c
 +  private boolean current(){return !isDestroyed()&&user==tdlib.myUserId();}
 +  @Override protected void onCreateView(Context context,CustomRecyclerView recycler){
 +    recycler.setLayoutManager(new LinearLayoutManager(context));recycler.setItemAnimator(null);
-+    folders=tdlib.chatFolders();adapter=new Adapter();recycler.setAdapter(adapter);
++    folders=tdlib.chatFolders();if(folders==null)folders=new TdApi.ChatFolderInfo[0];adapter=new Adapter();recycler.setAdapter(adapter);
 +  }
 +  private void choices(TdApi.ChatFolderInfo folder){
 +    if(!current()||loading)return;
-+    showOptions(TD.toCharSequence(folder.name),new int[]{R.id.btn_sviriSchedule,R.id.btn_sviriTransferFolder,R.id.btn_cancel},
-+      new String[]{"Forward newest Saved Message every 30 minutes","Transfer folder to another account",Lang.getString(R.string.Cancel)},(v,id)->{
-+        if(id==R.id.btn_sviriSchedule)load(folder);else if(id==R.id.btn_sviriTransferFolder)transfer(folder);return true;
++    showOptions(TD.toCharSequence(folder.name),new int[]{R.id.btn_sviriSchedule,R.id.btn_sviriTransferFolder,R.id.btn_sviriSortActivity,R.id.btn_cancel},
++      new String[]{"Автопересилання кожні 30 хвилин","Перенести папку","Сортувати за активністю й зафіксувати",Lang.getString(R.string.Cancel)},(v,id)->{
++        if(id==R.id.btn_sviriSchedule)load(folder);else if(id==R.id.btn_sviriTransferFolder)transfer(folder);else if(id==R.id.btn_sviriSortActivity)sortFolder(folder);return true;
 +      });
 +  }
 +  private void load(TdApi.ChatFolderInfo folder){
-+    if(!current()||loading)return;loading=true;adapter.notifyItemChanged(0);final int token=++generation;
-+    TdApi.ChatListFolder list=new TdApi.ChatListFolder(folder.id);
-+    loader=new FolderForwardLoader(new FolderForwardLoader.Transport(){
-+      @Override public void loadMore(java.util.function.Consumer<Integer> callback){tdlib.client().send(new TdApi.LoadChats(list,100),r->runOnUiThreadOptional(()->{if(current()&&token==generation)callback.accept(r instanceof TdApi.Ok?0:r instanceof TdApi.Error?((TdApi.Error)r).code:-1);}));}
-+      @Override public void snapshot(java.util.function.Consumer<long[]> callback){tdlib.client().send(new TdApi.GetChats(list,FolderForwardLoader.SNAPSHOT_LIMIT),r->runOnUiThreadOptional(()->{if(current()&&token==generation)callback.accept(r instanceof TdApi.Chats?((TdApi.Chats)r).chatIds:null);}));}
-+    },new FolderForwardLoader.Listener(){
-+      @Override public void complete(long[] ids){if(!current()||token!=generation)return;loading=false;adapter.notifyItemChanged(0);review(folder,ids);}
-+      @Override public void failed(){if(!current()||token!=generation)return;loading=false;adapter.notifyItemChanged(0);showOptions("Could not load every folder recipient. Nothing was scheduled.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});}
-+    });loader.start();UI.post(()->{if(current()&&token==generation&&loading)loader.timeout();},60000L);
++    if(!current()||loading)return;loading=true;progress="Завантаження папки…";adapter.notifyItemChanged(0);final int token=++generation;
++    loader=new FolderSnapshot(tdlib,folder.id,ids->{if(!current()||token!=generation)return;loading=false;adapter.notifyItemChanged(0);review(folder,ids);},error->{if(!current()||token!=generation)return;loading=false;adapter.notifyItemChanged(0);showOptions(error,new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});});loader.start();
 +  }
 +  private void review(TdApi.ChatFolderInfo folder,long[] ids){
 +    ArrayList<Long> groups=new ArrayList<>();StringBuilder names=new StringBuilder();int skipped=0;
 +    for(long id:ids){TdApi.Chat chat=tdlib.chat(id);boolean group=chat!=null&&(chat.type instanceof TdApi.ChatTypeBasicGroup||chat.type instanceof TdApi.ChatTypeSupergroup&&!((TdApi.ChatTypeSupergroup)chat.type).isChannel);
 +      if(group&&!tdlib.settings().isChatHidden(id)&&tdlib.canSendBasicMessage(chat)){groups.add(id);names.append("\n• ").append(chat.title);}else skipped++;}
-+    if(groups.isEmpty()||groups.size()>1000){showOptions("No eligible group snapshot, or more than 1000 groups. Nothing was scheduled.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});return;}
++    if(groups.isEmpty()||groups.size()>1000){showOptions("Немає доступних груп або вибрано понад 1000. Розклад не ввімкнено.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});return;}
 +    long[] reviewed=new long[groups.size()];for(int i=0;i<reviewed.length;i++)reviewed[i]=groups.get(i);
-+    String text="Approximately every 30 minutes, forward the newest standalone Saved Message to these "+groups.size()+" groups. This repeats even if the message has not changed. Albums are not supported yet.\n\nOnly enable this where recurring posts are allowed. Android may delay background runs. Errors pause the schedule; there is no automatic retry. No Stars are spent.\n\nRecipients stay fixed until you review again. Hidden chats are excluded. Skipped: "+skipped;
-+    showReview(text,names.toString(),()->showOptions(text,new int[]{R.id.btn_sviriSchedule,R.id.btn_cancel},new String[]{"Enable 30-minute schedule",Lang.getString(R.string.Cancel)},(v,id)->{
++    String text="Папка: "+TD.toCharSequence(folder.name)+"\nГруп: "+groups.size()+" · Пропущено: "+skipped+"\nІнтервал: приблизно 30 хвилин\nДжерело: останнє окреме повідомлення зі Збереженого. Повторюється навіть без змін. Альбоми поки не підтримуються.\n\nAndroid може відкласти запуск. Помилка призупиняє розклад. Одержувачі не додаються без повторного перегляду. Перевір список нижче.";
++    showReview(text,names.toString(),()->showOptions(text,new int[]{R.id.btn_sviriSchedule,R.id.btn_cancel},new String[]{"Увімкнути розклад",Lang.getString(R.string.Cancel)},(v,id)->{
 +      if(id==R.id.btn_sviriSchedule&&current()){FolderForwardWork.schedule(tdlib,folder.id,reviewed);clearReview();}return true;
 +    }));
 +  }
 +  private void transfer(TdApi.ChatFolderInfo folder){
-+    loading=true;adapter.notifyItemChanged(0);final int token=++generation;
++    if(!current()||loading)return;progress="Перевірка доступних чатів для перенесення…";loading=true;adapter.notifyItemChanged(0);final int token=++generation;
 +    tdlib.client().send(new TdApi.GetChatsForChatFolderInviteLink(folder.id),r->runOnUiThreadOptional(()->{
-+      if(!current()||token!=generation)return;loading=false;adapter.notifyItemChanged(0);
-+      if(!(r instanceof TdApi.Chats)){UI.showError(r);return;}
-+      ArrayList<Long> eligible=new ArrayList<>();StringBuilder names=new StringBuilder();
-+      for(long id:((TdApi.Chats)r).chatIds){TdApi.Chat chat=tdlib.chat(id);
-+        // Exclude basic groups: Telegram would otherwise convert them to supergroups on export.
-+        if(chat!=null&&chat.type instanceof TdApi.ChatTypeSupergroup&&!tdlib.settings().isChatHidden(id)){eligible.add(id);names.append("\n• ").append(chat.title);}}
-+      if(eligible.isEmpty()){showOptions("No shareable supergroups or channels. Private chats and inaccessible groups cannot be transferred.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});return;}
++      if(!current()||token!=generation)return;
++      if(!(r instanceof TdApi.Chats)){loading=false;adapter.notifyItemChanged(0);UI.showError(r);return;}
++      long[] available=((TdApi.Chats)r).chatIds;
++      loader=new FolderSnapshot(tdlib,folder.id,ids->{if(current()&&token==generation)resolveTransfer(folder,ids,token);},error->{if(current()&&token==generation){loading=false;progress=error;adapter.notifyDataSetChanged();}});loader.start(available);
++    }));
++    UI.post(()->{if(current()&&token==generation&&loading){generation++;loading=false;adapter.notifyItemChanged(0);}},60000L);
++  }
++  private void resolveTransfer(TdApi.ChatFolderInfo folder,long[] available,int token){
++    if(!current()||token!=generation)return;
++    ArrayList<Long> eligible=new ArrayList<>();StringBuilder names=new StringBuilder();
++    for(long id:available){TdApi.Chat chat=tdlib.chat(id);if(chat!=null&&chat.type instanceof TdApi.ChatTypeSupergroup&&!tdlib.settings().isChatHidden(id)){eligible.add(id);names.append("\n• ").append(chat.title);}}
++    loading=false;adapter.notifyItemChanged(0);
++      if(eligible.isEmpty()){showOptions("Telegram не надав чатів для спільної папки. Автоматична папка «усі групи» або приватні групи без права запрошення можуть бути недоступні для перенесення. Спробуй звичайну папку з явно доданими публічними групами. Особисті переписки не переносяться.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});return;}
 +      long[] exportIds=new long[eligible.size()];for(int i=0;i<exportIds.length;i++)exportIds[i]=eligible.get(i);
-+      String info="Create an invitation for "+eligible.size()+" shareable groups/channels, then review joining from another account. This does not copy private conversations or bypass Telegram folder limits. Rule-based folders may need a manual folder first.";
-+      showReview(info,names.toString(),()->showOptions(info,new int[]{R.id.btn_sviriTransferFolder,R.id.btn_cancel},new String[]{"Create transfer link",Lang.getString(R.string.Cancel)},(v,id)->{
++      String info="Перенести доступні групи й канали: "+eligible.size()+". На іншому акаунті відкриється перегляд перед вступом. Особисті переписки не копіюються. Для приватних груп потрібні права запрошення; діють ліміти Telegram.";
++      showReview(info,names.toString(),()->showOptions(info,new int[]{R.id.btn_sviriTransferFolder,R.id.btn_cancel},new String[]{"Створити посилання папки",Lang.getString(R.string.Cancel)},(v,id)->{
 +        if(id==R.id.btn_sviriTransferFolder&&current()){clearReview();createLink(folder,exportIds);}return true;
 +      }));
-+    }));
-+    UI.post(()->{if(current()&&token==generation&&loading){generation++;loading=false;adapter.notifyItemChanged(0);}},30000L);
 +  }
 +  private void createLink(TdApi.ChatFolderInfo folder,long[] ids){
 +    if(loading||!current())return;loading=true;adapter.notifyItemChanged(0);final int token=++generation;
@@ -4879,14 +4966,14 @@ index 00000000..b2ade95c
 +      if(!current()||token!=generation)return;loading=false;adapter.notifyItemChanged(0);
 +      if(r instanceof TdApi.ChatFolderInviteLink)chooseAccount(((TdApi.ChatFolderInviteLink)r).inviteLink);else UI.showError(r);
 +    }));
-+    UI.post(()->{if(current()&&token==generation&&loading){generation++;loading=false;adapter.notifyItemChanged(0);showOptions("Link creation was not confirmed. Check the folder's existing invite links before trying again.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});}},30000L);
++    UI.post(()->{if(current()&&token==generation&&loading){generation++;loading=false;adapter.notifyItemChanged(0);showOptions("Створення посилання не підтверджено. Перевір наявні посилання папки перед повторною спробою.",new int[]{R.id.btn_cancel},new String[]{Lang.getString(R.string.Done)});}},30000L);
 +  }
 +  private void chooseAccount(String link){
 +    ArrayList<Integer> ids=new ArrayList<>();ArrayList<String> labels=new ArrayList<>();ArrayList<TdlibAccount> accounts=new ArrayList<>();
-+    for(TdlibAccount account:TdlibManager.instance())if(account.id!=tdlib.id()&&account.getKnownUserId()!=0){accounts.add(account);ids.add(10000+accounts.size());labels.add("Import into account "+account.getKnownUserId());}
-+    ids.add(R.id.btn_share);labels.add("Share link to iPhone / another device");ids.add(R.id.btn_cancel);labels.add(Lang.getString(R.string.Cancel));
++    for(TdlibAccount account:TdlibManager.instance())if(account.id!=tdlib.id()&&account.getKnownUserId()!=0){accounts.add(account);ids.add(10000+accounts.size());labels.add("Перенести в "+account.getName());}
++    ids.add(R.id.btn_share);labels.add("Поділитися посиланням на інший пристрій");ids.add(R.id.btn_cancel);labels.add(Lang.getString(R.string.Cancel));
 +    int[] actions=new int[ids.size()];for(int i=0;i<actions.length;i++)actions[i]=ids.get(i);
-+    showOptions("Choose the destination account. Telegram will show a join preview before importing.",actions,labels.toArray(new String[0]),(v,id)->{
++    showOptions("Вибери інший акаунт. Перед вступом Telegram покаже список чатів.",actions,labels.toArray(new String[0]),(v,id)->{
 +      if(id==R.id.btn_share)tdlib.ui().shareUrl(this,link);
 +      else if(id>10000&&id<=10000+accounts.size()){TdlibAccount account=accounts.get(id-10001);importLink(account,account.getKnownUserId(),link);}return true;
 +    });
@@ -4900,19 +4987,58 @@ index 00000000..b2ade95c
 +      }));
 +    }));
 +  }
++  private void sortFolder(TdApi.ChatFolderInfo folder){
++    if(loading||!current())return;loading=true;final int token=++generation;progress="Завантаження папки…";adapter.notifyDataSetChanged();
++    loader=new FolderSnapshot(tdlib,folder.id,ids->{if(current()&&token==generation)startRanking(folder.id,ids,token);},error->{if(current()&&token==generation){loading=false;progress=error;adapter.notifyDataSetChanged();}});loader.start();
++  }
++  private void sortMain(){sortList(0);}
++  private void sortList(int listId){
++    if(loading||!current())return;loading=true;progress="Завантаження списку…";final int token=++generation;adapter.notifyDataSetChanged();
++    final boolean[] discovered={false};ArrayList<Long> ids=new ArrayList<>();tdlib.getAllChats(TdlibSettingsManager.orderChatList(listId),chat->UI.post(()->{if(current()&&token==generation&&!tdlib.settings().isChatHidden(chat.id))ids.add(chat.id);}),done->{if(done)UI.post(()->{if(current()&&token==generation){discovered[0]=true;startRanking(listId,ids.stream().mapToLong(Long::longValue).toArray(),token);}});},false);
++    UI.post(()->{if(current()&&loading&&token==generation&&!discovered[0]){generation++;loading=false;progress="Завантаження тривало понад 2 хвилини. Порядок не змінено.";adapter.notifyDataSetChanged();}},120000L);
++  }
++  private void startRanking(int listId,long[] ids,int token){
++    if(!current()||token!=generation)return;
++    ArrayList<TdApi.Chat> list=new ArrayList<>();for(long id:ids){TdApi.Chat c=tdlib.chat(id);if(c!=null&&!tdlib.settings().isChatHidden(id))list.add(c);}
++    rankNext(listId,list,new HashMap<>(),0,token);
++  }
++  private void rankNext(int listId,ArrayList<TdApi.Chat> list,Map<Long,Integer> scores,int index,int token){
++    if(!current()||!loading||token!=generation)return;
++    progress="Оцінка активності: "+index+" / "+list.size()+"\nДо 100 останніх повідомлень за 7 днів. Це наближена оцінка. Після сортування порядок залишиться фіксованим.";adapter.notifyItemChanged(0);
++    if(index==list.size()){
++      list.sort((a,b)->{if(a.id==tdlib.selfChatId())return b.id==a.id?0:-1;if(b.id==tdlib.selfChatId())return 1;int c=Integer.compare(scores.getOrDefault(b.id,-1),scores.getOrDefault(a.id,-1));return c!=0?c:Integer.compare(b.lastMessage!=null?b.lastMessage.date:0,a.lastMessage!=null?a.lastMessage.date:0);});
++      tdlib.settings().replaceChatOrder(listId,list.stream().mapToLong(c->c.id).toArray());loading=false;progress="Порядок збережено. Збережене перше; чати не стрибатимуть від нових повідомлень.";adapter.notifyDataSetChanged();return;
++    }
++    TdApi.Chat chat=list.get(index);int since=(int)(System.currentTimeMillis()/1000L)-7*86400;
++    if(chat.id==tdlib.selfChatId()||(chat.lastMessage!=null&&chat.lastMessage.date<since)){scores.put(chat.id,0);UI.post(()->rankNext(listId,list,scores,index+1,token));return;}
++    final boolean[] received={false};UI.post(()->{if(current()&&loading&&token==generation&&!received[0]){generation++;loading=false;progress="Сервер не відповів. Порядок не змінено.";adapter.notifyDataSetChanged();}},15000L);
++    tdlib.client().send(new TdApi.GetChatHistory(chat.id,0,0,100,false),result->UI.post(()->{
++      if(!current()||!loading||token!=generation)return;received[0]=true;
++      if(!(result instanceof TdApi.Messages)){loading=false;progress=result instanceof TdApi.Error?TD.toErrorString(result):"Порядок не змінено.";adapter.notifyDataSetChanged();return;}
++      TdApi.Message[] messages=((TdApi.Messages)result).messages;int[] dates=new int[messages.length];for(int i=0;i<dates.length;i++)dates[i]=messages[i]!=null?messages[i].date:0;scores.put(chat.id,ChatActivityPolicy.sample(dates,since).count);UI.post(()->rankNext(listId,list,scores,index+1,token),100L);
++    }));
++  }
 +  private void showReview(String header,String names,Runnable confirm) {
 +    reviewHeader=header;reviewConfirm=confirm;reviewNames.clear();
 +    for(String name:names.split("\\n• "))if(!name.trim().isEmpty())reviewNames.add(name.trim());
 +    adapter.notifyDataSetChanged();getRecyclerView().scrollToPosition(0);
 +  }
 +  private void clearReview(){reviewHeader=null;reviewConfirm=null;reviewNames.clear();adapter.notifyDataSetChanged();}
++  private void button(LinearLayout box,String label,Runnable action){
++    TextView t=new TextView(box.getContext());t.setText(label);t.setTextSize(15);t.setTextColor(Theme.getColor(ColorId.textLink));t.setPadding(0,Screen.dp(12),0,Screen.dp(12));t.setOnClickListener(v->{if(current())action.run();});box.addView(t);
++  }
 +  private final class Adapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>{
 +    @Override public int getItemCount(){return (reviewHeader!=null?reviewNames.size():folders.length)+1;}
-+    @Override public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent,int type){TextView t=new TextView(parent.getContext());t.setTextColor(Theme.getColor(ColorId.text));t.setTextSize(15);t.setPadding(Screen.dp(18),Screen.dp(16),Screen.dp(18),Screen.dp(16));t.setLayoutParams(new RecyclerView.LayoutParams(-1,-2));return new RecyclerView.ViewHolder(t){};}
-+    @Override public void onBindViewHolder(RecyclerView.ViewHolder holder,int position){TextView t=(TextView)holder.itemView;
-+      if(reviewHeader!=null){t.setText(position==0?reviewHeader+"\n\nReview the recipients below. Tap this text to continue, or go back to cancel.":reviewNames.get(position-1));t.setOnClickListener(position==0?v->{if(current()&&reviewConfirm!=null)reviewConfirm.run();}:null);return;}
-+      if(position==0){t.setText((loading?"Loading…\n":"")+FolderForwardWork.status(tdlib.id())+"\n\nTap here to pause / refresh status. Select a folder below for transfer or scheduling. Android schedules are local to this device.");t.setOnClickListener(v->{if(FolderForwardWork.enabled(tdlib.id()))FolderForwardWork.pauseSchedule(tdlib.id());notifyItemChanged(0);});}
-+      else{TdApi.ChatFolderInfo f=folders[position-1];t.setText(TD.toCharSequence(f.name));t.setOnClickListener(v->choices(f));}
++    @Override public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent,int type){LinearLayout box=new LinearLayout(parent.getContext());box.setOrientation(LinearLayout.VERTICAL);box.setPadding(Screen.dp(18),Screen.dp(12),Screen.dp(18),Screen.dp(12));box.setLayoutParams(new RecyclerView.LayoutParams(-1,-2));return new RecyclerView.ViewHolder(box){};}
++    @Override public void onBindViewHolder(RecyclerView.ViewHolder holder,int position){LinearLayout box=(LinearLayout)holder.itemView;box.removeAllViews();TextView t=new TextView(box.getContext());t.setTextSize(15);t.setTextColor(Theme.getColor(ColorId.text));box.addView(t);
++      if(reviewHeader!=null){t.setText(position==0?reviewHeader:reviewNames.get(position-1));if(position==0){button(box,"Продовжити з цими одержувачами",()->{if(reviewConfirm!=null)reviewConfirm.run();});button(box,"Скасувати",SviriFolderToolsController.this::clearReview);}return;}
++      if(position==0){t.setText(loading?progress:progress+"\n"+(FolderForwardWork.enabled(tdlib.id())?"● Автопересилання ввімкнене":"○ Автопересилання вимкнене")+"\n"+FolderForwardWork.status(tdlib.id())+"\n\nВибери папку нижче. Порядок чатів зберігається локально й не змінює закріплення Telegram.");
++        if(loading)button(box,"Скасувати завантаження",()->{generation++;loading=false;if(loader!=null)loader.cancel();progress="Скасовано";notifyDataSetChanged();});
++        if(FolderForwardWork.enabled(tdlib.id()))button(box,"Зупинити автопересилання",()->{FolderForwardWork.pauseSchedule(tdlib.id());notifyDataSetChanged();});
++        button(box,"Сортувати основний список за активністю",()->sortMain());
++        button(box,"Сортувати архів за активністю",()->sortList(-1));
++        button(box,"Оновити стан",()->notifyDataSetChanged());
++      }else{TdApi.ChatFolderInfo f=folders[position-1];t.setText("📁 "+TD.toCharSequence(f.name));button(box,"Налаштувати папку",()->choices(f));}
 +    }
 +  }
 +  @Override public void destroy(){generation++;if(loader!=null)loader.cancel();super.destroy();}
@@ -5830,10 +5956,10 @@ index 00000000..f638b1a5
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriInactiveChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriInactiveChatsController.java
 new file mode 100644
-index 00000000..a0f47189
+index 00000000..d25f1766
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriInactiveChatsController.java
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,137 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -5866,7 +5992,9 @@ index 00000000..a0f47189
 +  private final List<TdApi.Chat> rows=new ArrayList<>();
 +  private final Map<Long,ChatActivityPolicy.Sample> samples=new HashMap<>();
 +  private final List<AvatarView> avatars=new ArrayList<>();
-+  private final Set<Long> leaving=new HashSet<>();
++  private final LinkedHashSet<Long> selected=new LinkedHashSet<>();
++  private boolean batchRunning;
++  private int batchGeneration,batchCompleted;
 +  private Adapter adapter;
 +  private int generation,discoveries,checked;
 +  private boolean loading,scanning;
@@ -5882,14 +6010,14 @@ index 00000000..a0f47189
 +    rows.sort((a,b)->ChatActivityPolicy.compareLastMessage(a.lastMessage!=null?a.lastMessage.date:0,b.lastMessage!=null?b.lastMessage.date:0,a.id,b.id));adapter.notifyDataSetChanged();
 +  }
 +  private void load(){
-+    if(!current()||loading||scanning)return;loading=true;error=null;discoveries=2;final int token=++generation;reload();
++    if(!current()||loading||scanning||batchRunning)return;loading=true;error=null;discoveries=2;final int token=++generation;reload();
 +    for(TdApi.ChatList list:new TdApi.ChatList[]{new TdApi.ChatListMain(),new TdApi.ChatListArchive()})tdlib.getAllChats(list,chat->UI.post(()->{
 +      if(current()&&token==generation&&eligible(chat))chats.put(chat.id,chat);
 +    }),done->{if(done)UI.post(()->{if(current()&&token==generation&&--discoveries==0){loading=false;reload();}});},false);
 +    UI.post(()->{if(current()&&token==generation&&loading){generation++;loading=false;error=Lang.getString(R.string.SviriInactivePartial);reload();}},30000L);
 +  }
 +  private void scan(){
-+    if(!current()||loading||scanning)return;
++    if(!current()||loading||scanning||batchRunning)return;
 +    ArrayDeque<Long> queue=new ArrayDeque<>();for(TdApi.Chat c:rows)if(queue.size()<20&&!samples.containsKey(c.id)&&(c.lastMessage==null||c.lastMessage.date>=since))queue.add(c.id);
 +    if(queue.isEmpty())return;scanning=true;checked=0;error=null;int token=++generation;next(queue,token);
 +  }
@@ -5913,22 +6041,33 @@ index 00000000..a0f47189
 +    String count=sample==null||sample.count<0?"—":(sample.exact?"":"≥")+sample.count;
 +    return Lang.getString(R.string.SviriInactiveLast,last)+"\n"+Lang.getString(R.string.SviriInactiveWeek,count);
 +  }
-+  private void actions(TdApi.Chat chat){
-+    if(!current()||!eligible(chat)||leaving.contains(chat.id))return;
-+    showOptions(chat.title+"\n"+details(chat),new int[]{R.id.btn_open,R.id.btn_removeChatFromList,R.id.btn_cancel},new String[]{Lang.getString(R.string.Open),Lang.getString(R.string.SviriInactiveLeave),Lang.getString(R.string.Cancel)},(v,id)->{
-+      if(id==R.id.btn_open)tdlib.ui().openChat(this,chat.id,new TdlibUi.ChatOpenParameters());
-+      else if(id==R.id.btn_removeChatFromList)confirmLeave(chat);return true;
++  private void toggle(TdApi.Chat chat){
++    if(!current()||batchRunning)return;if(!selected.remove(chat.id))selected.add(chat.id);reload();
++  }
++  private void selectFifty(){if(batchRunning||loading||scanning)return;int added=0;for(TdApi.Chat c:rows)if(selected.add(c.id)&&++added==50)break;reload();}
++  private void reviewLeave(){
++    if(!current()||batchRunning||selected.isEmpty()||loading||scanning)return;
++    ArrayList<Long> snapshot=new ArrayList<>();for(TdApi.Chat c:rows)if(selected.contains(c.id))snapshot.add(c.id);
++    if(snapshot.isEmpty())return;
++    showOptions("Вийти з вибраних чатів: "+snapshot.size()+"? Перевір позначені рядки. Для повернення у приватні групи може знадобитися запрошення. Історія не видаляється.",new int[]{R.id.btn_removeChatFromList,R.id.btn_cancel},new String[]{"Вийти з "+snapshot.size()+" чатів",Lang.getString(R.string.Cancel)},new int[]{OptionColor.RED,OptionColor.NORMAL},null,(v,id)->{
++      if(id==R.id.btn_removeChatFromList&&current()&&!batchRunning){batchRunning=true;batchCompleted=0;error=null;int token=++batchGeneration;leaveNext(new ArrayDeque<>(snapshot),token);}return true;
 +    });
 +  }
-+  private void confirmLeave(TdApi.Chat chat){
-+    showOptions(Lang.getString(R.string.SviriInactiveLeaveConfirm,chat.title),new int[]{R.id.btn_removeChatFromList,R.id.btn_cancel},new String[]{Lang.getString(R.string.SviriInactiveLeave),Lang.getString(R.string.Cancel)},new int[]{OptionColor.RED,OptionColor.NORMAL},null,(v,id)->{
-+      if(id==R.id.btn_removeChatFromList&&current()&&eligible(chat)&&leaving.add(chat.id))tdlib.client().send(new TdApi.LeaveChat(chat.id),r->runOnUiThreadOptional(()->{
-+        leaving.remove(chat.id);if(!current())return;
-+        if(r instanceof TdApi.Ok){chats.remove(chat.id);samples.remove(chat.id);reload();}
-+        else UI.showError(r);
-+      }));return true;
-+    });
++  private void leaveNext(ArrayDeque<Long> queue,int token){
++    if(!current()||!batchRunning||token!=batchGeneration)return;
++    if(queue.isEmpty()){batchRunning=false;error="Готово. Вийшли з чатів: "+batchCompleted;reload();return;}
++    long id=queue.remove();TdApi.Chat chat=tdlib.chat(id);
++    if(!eligible(chat)){selected.remove(id);leaveNext(queue,token);return;}
++    final boolean[] finished={false};reload();
++    Runnable timeout=()->{if(current()&&batchRunning&&token==batchGeneration&&!finished[0]){finished[0]=true;batchRunning=false;batchGeneration++;error="Відповідь сервера не отримано. Перевір список перед повтором.";reload();}};
++    UI.post(timeout,20000L);
++    tdlib.client().send(new TdApi.LeaveChat(id),result->UI.post(()->{
++      if(!current()||!batchRunning||token!=batchGeneration||finished[0])return;finished[0]=true;UI.removePendingRunnable(timeout);
++      if(result instanceof TdApi.Ok){selected.remove(id);chats.remove(id);samples.remove(id);batchCompleted++;reload();UI.post(()->leaveNext(queue,token),500L);}
++      else {batchRunning=false;batchGeneration++;error=result instanceof TdApi.Error?TD.toErrorString(result):"Не вдалося вийти. Решта чатів залишились вибраними.";reload();}
++    }));
 +  }
++  private void command(Row h,String label,Runnable action){TextView t=text(h.itemView.getContext(),14,ColorId.textLink);t.setText(label);t.setPadding(0,Screen.dp(9),0,Screen.dp(9));t.setOnClickListener(v->{if(current())action.run();});h.commands.addView(t);}
 +  private TextView text(Context c,int size,int color){TextView t=new TextView(c);t.setTextSize(size);t.setTextColor(Theme.getColor(color));return t;}
 +  private final class Row extends RecyclerView.ViewHolder {
 +    AvatarView avatar;TextView title,description;LinearLayout commands;
@@ -5937,26 +6076,33 @@ index 00000000..a0f47189
 +      LinearLayout body=new LinearLayout(c);body.setOrientation(LinearLayout.VERTICAL);root.addView(body,new LinearLayout.LayoutParams(0,-2,1));
 +      title=text(c,15,ColorId.text);title.setTypeface(null,Typeface.BOLD);title.setMaxLines(header?6:2);body.addView(title);
 +      description=text(c,12,ColorId.textLight);description.setPadding(0,Screen.dp(5),0,Screen.dp(6));body.addView(description);
-+      if(header){commands=new LinearLayout(c);body.addView(commands);}
++      if(header){commands=new LinearLayout(c);commands.setOrientation(LinearLayout.VERTICAL);body.addView(commands);}
 +    }
 +  }
 +  private final class Adapter extends RecyclerView.Adapter<Row>{
 +    @Override public int getItemCount(){return rows.size()+1;}@Override public int getItemViewType(int p){return p==0?0:1;}
 +    @Override public Row onCreateViewHolder(ViewGroup parent,int type){LinearLayout root=new LinearLayout(parent.getContext());root.setLayoutParams(new RecyclerView.LayoutParams(-1,-2));return new Row(root,type==0);}
-+    @Override public void onBindViewHolder(Row h,int p){if(p==0){h.title.setText(Lang.getString(R.string.SviriInactiveHint));h.description.setText(error!=null?error:loading?Lang.getString(R.string.LoadingInformation):scanning?Lang.getString(R.string.SviriInactiveChecking,checked):Lang.getString(R.string.SviriInactiveCount,rows.size()));h.commands.removeAllViews();
-+      TextView refresh=text(h.itemView.getContext(),14,ColorId.textLink);refresh.setText(Lang.getString(R.string.SviriInactiveRefresh));refresh.setPadding(0,Screen.dp(8),Screen.dp(20),Screen.dp(8));refresh.setOnClickListener(v->load());h.commands.addView(refresh);
-+      TextView sample=text(h.itemView.getContext(),14,ColorId.textLink);sample.setText(Lang.getString(R.string.SviriInactiveCheck));sample.setOnClickListener(v->scan());sample.setPadding(0,Screen.dp(8),0,Screen.dp(8));h.commands.addView(sample);
-+    }else{TdApi.Chat chat=rows.get(p-1);h.avatar.setChat(tdlib,chat);h.title.setText(chat.title);h.description.setText(details(chat));h.itemView.setOnClickListener(v->actions(chat));}}
++    @Override public void onBindViewHolder(Row h,int p){if(p==0){
++      h.title.setText(Lang.getString(R.string.SviriInactiveHint));
++      h.description.setText(error!=null?error:batchRunning?"Вихід із чатів: "+batchCompleted+" завершено":loading?Lang.getString(R.string.LoadingInformation):scanning?Lang.getString(R.string.SviriInactiveChecking,checked):"Чатів: "+rows.size()+" · Вибрано: "+selected.size());h.commands.removeAllViews();
++      if(batchRunning)command(h,"Зупинити після поточного запиту",()->{batchRunning=false;batchGeneration++;error="Зупинено. Поточний запит міг уже виконатися. Онови список.";reload();});
++      else {
++        command(h,"Вибрати наступні 50",SviriInactiveChatsController.this::selectFifty);
++        if(!selected.isEmpty()){command(h,"Вийти з вибраних ("+selected.size()+")",SviriInactiveChatsController.this::reviewLeave);command(h,"Скасувати вибір",()->{selected.clear();reload();});}
++        command(h,Lang.getString(R.string.SviriInactiveRefresh),SviriInactiveChatsController.this::load);
++        command(h,Lang.getString(R.string.SviriInactiveCheck),SviriInactiveChatsController.this::scan);
++      }
++    }else{TdApi.Chat chat=rows.get(p-1);h.avatar.setChat(tdlib,chat);h.title.setText((selected.contains(chat.id)?"☑ ":"☐ ")+chat.title);h.description.setText(details(chat));h.itemView.setOnClickListener(v->toggle(chat));h.itemView.setOnLongClickListener(v->{if(current()&&!batchRunning)tdlib.ui().openChat(SviriInactiveChatsController.this,chat.id,new TdlibUi.ChatOpenParameters());return true;});}}
 +    @Override public void onViewRecycled(Row h){if(h.avatar!=null)h.avatar.setChat(tdlib,null);super.onViewRecycled(h);}
 +  }
-+  @Override public void destroy(){generation++;for(AvatarView a:avatars)a.performDestroy();avatars.clear();super.destroy();}
++  @Override public void destroy(){generation++;batchGeneration++;batchRunning=false;for(AvatarView a:avatars)a.performDestroy();avatars.clear();super.destroy();}
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriMentionsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriMentionsController.java
 new file mode 100644
-index 00000000..75f84934
+index 00000000..2d92db47
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriMentionsController.java
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,149 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.ui;
 +
@@ -5991,6 +6137,7 @@ index 00000000..75f84934
 +  private final List<MentionInboxStore.Entry> rows = new ArrayList<>();
 +  private final ArrayDeque<Long> pending = new ArrayDeque<>();
 +  private final HashSet<Long> queued = new HashSet<>();
++  private final Runnable inboxChanged=()->UI.post(this::requestReload);
 +  private Adapter adapter;
 +  private boolean unreadOnly,reloadQueued;
 +  private final List<AvatarView> avatars=new ArrayList<>();
@@ -6005,14 +6152,14 @@ index 00000000..75f84934
 +    recycler.setLayoutManager(new LinearLayoutManager(context));recycler.setItemAnimator(null);
 +    recycler.setPadding(Screen.dp(12),Screen.dp(8),Screen.dp(12),Screen.dp(16));
 +    adapter=new Adapter();recycler.setAdapter(adapter);
-+    tdlib.listeners().subscribeForGlobalUpdates(this);tdlib.settings().addHiddenChatsListener(this);reload();
++    tdlib.listeners().subscribeForGlobalUpdates(this);tdlib.settings().addHiddenChatsListener(this);tdlib.settings().mentionInbox().addListener(inboxChanged);reload();
 +  }
 +  private void reload() {
 +    if(!current()||adapter==null)return;
 +    rows.clear();
 +    for(MentionInboxStore.Entry e:tdlib.settings().mentionInbox().snapshot()) {
 +      TdApi.User author=e.senderUserId>0?tdlib.cache().user(e.senderUserId):null;
-+      boolean human=MentionInboxPolicy.humanPersonal(e)||(e.senderUserId>0&&e.authorType==0&&e.relation!=0&&!e.viaBot&&author!=null&&author.type instanceof TdApi.UserTypeRegular);
++      boolean human=MentionInboxPolicy.humanPersonal(e)||(e.senderUserId>0&&e.authorType==0&&e.relation==3&&!e.viaBot&&author!=null&&author.type instanceof TdApi.UserTypeRegular);
 +      if(human&&(!unreadOnly||!e.seen)&&!tdlib.settings().isChatHidden(e.chatId)&&!tdlib.settings().isMentionSenderIgnored(e.senderUserId))rows.add(e);
 +    }
 +    adapter.notifyDataSetChanged();
@@ -6049,7 +6196,7 @@ index 00000000..75f84934
 +    });
 +  }
 +  private void requestReload(){if(reloadQueued||!current())return;reloadQueued=true;UI.post(()->{reloadQueued=false;reload();},150L);}
-+  @Override public void onNewMessage(TdApi.Message message) { if(message.containsUnreadMention)UI.post(this::requestReload); }
++  @Override public void onNewMessage(TdApi.Message message) { if(message.replyTo instanceof TdApi.MessageReplyToMessage)UI.post(this::requestReload); }
 +  @Override public void onMessageContentChanged(long chat,long id,TdApi.MessageContent content) { if(tdlib.settings().mentionInbox().contains(chat,id))UI.post(this::requestReload); }
 +  @Override public void onMessagesDeleted(long chat,long[] ids) { UI.post(this::requestReload); }
 +  @Override public void onHiddenChatChanged(long chatId) { UI.post(this::requestReload); }
@@ -6095,7 +6242,7 @@ index 00000000..75f84934
 +        h.status.setText(discovering||requesting||!pending.isEmpty()?Lang.getString(R.string.LoadingInformation):error!=null?error:rows.isEmpty()?Lang.getString(R.string.SviriMentionsPeopleEmpty):Lang.getString(R.string.SviriMentionsPeopleHint));
 +      }else {
 +        MentionInboxStore.Entry e=rows.get(position-1);h.avatar.setUser(tdlib,e.senderUserId,false);h.title.setText((e.seen?"":"● ")+e.chat);
-+        h.meta.setText(e.sender+" · "+Lang.getString(e.relation==2?R.string.SviriMentionReply:R.string.SviriMentionTag)+" · "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(e.date*1000L)));h.preview.setText(e.text);
++        h.meta.setText(e.sender+" · "+Lang.getString(e.relation==3?R.string.SviriMentionReply:R.string.SviriMentionTag)+" · "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(e.date*1000L)));h.preview.setText(e.text);
 +        h.itemView.setOnClickListener(v->{if(!current()||tdlib.settings().isChatHidden(e.chatId))return;tdlib.settings().mentionInbox().seen(e.chatId,e.messageId);
 +          tdlib.ui().openChat(SviriMentionsController.this,e.chatId,new TdlibUi.ChatOpenParameters().highlightMessage(new MessageId(e.chatId,e.messageId)).ensureHighlightAvailable());reload();});
 +        h.itemView.setOnLongClickListener(v->{if(current())showOptions(e.sender,new int[]{R.id.btn_delete,R.id.btn_cancel},new String[]{Lang.getString(R.string.SviriMentionsIgnoreSender),Lang.getString(R.string.Cancel)},(view,id)->{if(id==R.id.btn_delete&&current()){tdlib.settings().ignoreMentionSender(e.senderUserId);reload();}return true;});return true;});
@@ -6103,7 +6250,7 @@ index 00000000..75f84934
 +    }
 +    @Override public void onViewRecycled(Row h){if(h.avatar!=null)h.avatar.setUser(tdlib,(TdApi.User)null,false);super.onViewRecycled(h);}
 +  }
-+  @Override public void destroy(){generation++;for(AvatarView a:avatars)a.performDestroy();avatars.clear();tdlib.listeners().unsubscribeFromGlobalUpdates(this);tdlib.settings().removeHiddenChatsListener(this);super.destroy();}
++  @Override public void destroy(){generation++;for(AvatarView a:avatars)a.performDestroy();avatars.clear();tdlib.listeners().unsubscribeFromGlobalUpdates(this);tdlib.settings().removeHiddenChatsListener(this);tdlib.settings().mentionInbox().removeListener(inboxChanged);super.destroy();}
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriProfileController.java
 new file mode 100644
@@ -6757,7 +6904,7 @@ index 00000000..a013a63b
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
 +circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
 diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
-index 98ed3d29..3db47f2d 100644
+index 98ed3d29..234d5d2a 100644
 --- a/app/src/main/res/values/ids.xml
 +++ b/app/src/main/res/values/ids.xml
 @@ -1,5 +1,11 @@
@@ -6772,7 +6919,7 @@ index 98ed3d29..3db47f2d 100644
    <item type="id" name="app_root" />
    <item type="id" name="app_container" />
  
-@@ -1433,4 +1439,27 @@
+@@ -1433,4 +1439,28 @@
    <item type="id" name="btn_playback_speed_1_2" />
    <item type="id" name="btn_playback_speed_1_5" />
    <item type="id" name="btn_playback_speed_2_0" />
@@ -6801,9 +6948,10 @@ index 98ed3d29..3db47f2d 100644
 +  <item type="id" name="btn_sviriTransferFolder" />
 +  <item name="controller_sviriInactive" type="id" />
 +  <item name="btn_sviriInactive" type="id" />
++  <item name="btn_sviriSortActivity" type="id" />
 +</resources>
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af9..74fdb6dd 100644
+index 416f9af9..2e607445 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -6933,7 +7081,7 @@ index 416f9af9..74fdb6dd 100644
 +  <string name="SviriGiftSupply">Issued</string>
 +  <string name="SviriGiftOriginalSender">Original sender</string>
 +  <string name="SviriGiftOriginalReceiver">Original recipient</string>
-+  <string name="SviriMentions">Згадки та відповіді</string>
++  <string name="SviriMentions">Відповіді на мої повідомлення</string>
 +  <string name="SviriMentionMedia">Media message</string>
 +  <string name="SviriMentionsHint">Replies and mentions from your groups, collected while this app receives updates. Up to 500 recent entries are kept locally. Hidden chats are excluded. Refresh adds up to 20 unread mentions per group; it does not read them.</string>
 +  <string name="SviriMentionsEmpty">New replies and mentions will appear here.</string>
@@ -6944,9 +7092,9 @@ index 416f9af9..74fdb6dd 100644
 +  <string name="SviriRegistered">Registered</string>
 +  <string name="SviriAccountInfoHint">Telegram provides these details only for some accounts that contact you. The country refers to the phone number, not the user’s location or country of registration.</string>
 +  <string name="SviriAccountInfoUnknown">Telegram has not provided this information for this account.</string>
-+  <string name="SviriFolderTools">Folder transfer and schedule</string>
++  <string name="SviriFolderTools">Папки та автопересилання</string>
 +  <string name="SviriInactiveChats">Неактивні групи й канали</string>
-+  <string name="SviriInactiveHint">Найдавніша активність зверху. Архів не звільняє ліміт: для цього потрібно вийти. Оцінка за 7 днів: ≥ означає неповний підрахунок, — означає невідомо.</string>
++  <string name="SviriInactiveHint">Вибери чати натисканням або кнопкою «Наступні 50». Затисни рядок для перегляду. Вихід — після підтвердження. Найдавніші зверху; ≥ — неповна оцінка, — — невідомо.</string>
 +  <string name="SviriInactivePartial">Не всі дані отримано. Можна оновити список вручну.</string>
 +  <string name="SviriInactiveUnknown">Невідомо</string>
 +  <string name="SviriInactiveLast">Останнє повідомлення: %1$s</string>
@@ -6957,11 +7105,11 @@ index 416f9af9..74fdb6dd 100644
 +  <string name="SviriInactiveCount">Груп і каналів: %1$d</string>
 +  <string name="SviriInactiveRefresh">Оновити</string>
 +  <string name="SviriInactiveCheck">Оцінити наступні 20</string>
-+  <string name="SviriMentionsPeople">Люди</string>
++  <string name="SviriMentionsPeople">Відповіді</string>
 +  <string name="SviriMentionsUnread">Нові</string>
-+  <string name="SviriMentionsPeopleHint">Згадки та відповіді від людей у твоїх групах.</string>
-+  <string name="SviriMentionsPeopleEmpty">Згадок від людей поки немає. Натисни ↻, щоб перевірити нові.</string>
-+  <string name="SviriMentionsInfo">Боти й повідомлення через ботів приховані. Нові — це непереглянуті записи цього розділу. Оновлення отримує до 20 непрочитаних згадок із кожної групи, не позначаючи їх прочитаними в Telegram. Старі записи без даних автора не показуються. Затисни запис, щоб приховати автора.</string>
++  <string name="SviriMentionsPeopleHint">Тільки підтверджені відповіді на твої повідомлення. Теги приховані.</string>
++  <string name="SviriMentionsPeopleEmpty">Відповідей поки немає. Натисни ↻, щоб перевірити нові.</string>
++  <string name="SviriMentionsInfo">Тут показуються відповіді від людей на твої повідомлення. Автор початкового повідомлення перевіряється окремо. Теги, Telegram-боти й повідомлення через ботів приховані. Оновлення отримує до 20 непрочитаних згадок-відповідей із кожної групи. Старі неперевірені записи не показуються.</string>
 +  <string name="SviriMentionsResetIgnored">Повернути прихованих авторів</string>
 +  <string name="SviriMentionsIgnoreSender">Не показувати цього автора</string>
 +  <string name="SviriMentionReply">відповідь</string>
@@ -7322,7 +7470,7 @@ index 00000000..568aa9a7
 +}
 diff --git a/tests/sviri/check_activity_inbox.py b/tests/sviri/check_activity_inbox.py
 new file mode 100644
-index 00000000..f518d93d
+index 00000000..8c7785e7
 --- /dev/null
 +++ b/tests/sviri/check_activity_inbox.py
 @@ -0,0 +1,42 @@
@@ -7345,16 +7493,16 @@ index 00000000..f518d93d
 +  TdApi.Message m=new TdApi.Message();m.senderId=new TdApi.MessageSenderUser(15);m.containsUnreadMention=true;
 +  check(MentionInboxPolicy.authorType(m.senderId,human)==1);check(MentionInboxPolicy.authorType(m.senderId,bot)==2);check(MentionInboxPolicy.authorType(new TdApi.MessageSenderChat(9),human)==3);
 +  TdApi.FormattedText text=new TdApi.FormattedText("@Owner hello",new TdApi.TextEntity[]{new TdApi.TextEntity(0,6,new TdApi.TextEntityTypeMention())});
-+  check(MentionInboxPolicy.relation(m,text,42,new String[]{"owner"})==1);check(MentionInboxPolicy.relation(m,text,42,new String[]{"other"})==0);
++  check(MentionInboxPolicy.relation(m,text,42,new String[]{"owner"})==0);check(MentionInboxPolicy.relation(m,text,42,new String[]{"other"})==0);
 +  text.entities[0].offset=-1;check(MentionInboxPolicy.relation(m,text,42,new String[]{"owner"})==0);
-+  text.entities[0]=new TdApi.TextEntity(0,6,new TdApi.TextEntityTypeMentionName(42));check(MentionInboxPolicy.relation(m,text,42,null)==1);
-+  m.replyTo=new TdApi.MessageReplyToMessage();check(MentionInboxPolicy.relation(m,null,42,null)==2);m.containsUnreadMention=false;check(MentionInboxPolicy.relation(m,null,42,null)==0);
++  text.entities[0]=new TdApi.TextEntity(0,6,new TdApi.TextEntityTypeMentionName(42));check(MentionInboxPolicy.relation(m,text,42,null)==0);
++  m.replyTo=new TdApi.MessageReplyToMessage();check(MentionInboxPolicy.relation(m,null,42,null)==2);m.containsUnreadMention=false;check(MentionInboxPolicy.relation(m,null,42,null)==2);TdApi.Message original=new TdApi.Message();original.senderId=new TdApi.MessageSenderUser(42);check(MentionInboxPolicy.repliedToMe(original,42));check(!MentionInboxPolicy.repliedToMe(original,43));check(!MentionInboxPolicy.repliedToMe(null,42));
 +  Store store=new Store();MentionInboxStore inbox=new MentionInboxStore(42,store);
-+  MentionInboxStore.Entry e=new MentionInboxStore.Entry(1,2,3,"Group","Person","Hello",false,15,1,2,false);check(MentionInboxPolicy.humanPersonal(e));
++  MentionInboxStore.Entry e=new MentionInboxStore.Entry(1,2,3,"Group","Person","Hello",false,15,1,3,false);check(MentionInboxPolicy.humanPersonal(e));check(!MentionInboxPolicy.humanPersonal(new MentionInboxStore.Entry(1,2,3,"G","P","legacy",false,15,1,2,false)));
 +  check(!MentionInboxPolicy.humanPersonal(new MentionInboxStore.Entry(1,2,3,"G","Bot","x",false,15,2,2,false)));
 +  check(!MentionInboxPolicy.humanPersonal(new MentionInboxStore.Entry(1,2,3,"G","P","x",false,15,1,2,true)));
 +  inbox.put(e);inbox.seen(1,2);inbox.edit(1,2,"Edited");inbox=new MentionInboxStore(42,store);e=inbox.snapshot().get(0);
-+  check(e.seen&&e.senderUserId==15&&e.relation==2&&e.authorType==1&&e.text.equals("Edited"));check(new MentionInboxStore(43,store).snapshot().isEmpty());
++  check(e.seen&&e.senderUserId==15&&e.relation==3&&e.authorType==1&&e.text.equals("Edited"));check(new MentionInboxStore(43,store).snapshot().isEmpty());
 +  ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);out.writeInt(1);out.writeLong(42);out.writeInt(1);out.writeLong(1);out.writeLong(2);out.writeInt(3);out.writeUTF("Group");out.writeUTF("Old");out.writeUTF("Hi");out.writeBoolean(false);out.flush();store.data=bytes.toByteArray();
 +  inbox=new MentionInboxStore(42,store);check(inbox.snapshot().size()==1&&!MentionInboxPolicy.humanPersonal(inbox.snapshot().get(0)));inbox.put(new MentionInboxStore.Entry(1,2,3,"G","P","new",false,15,1,1,false));check(new DataInputStream(new ByteArrayInputStream(store.data)).readInt()==2);
 +  System.out.println("PASS: activity exact/lower-bound/unknown counts; real TDLib human/bot/mention/reply policy; metadata persistence and v1 migration");
@@ -7499,6 +7647,54 @@ index 00000000..46271787
 + subprocess.run(['java','-cp',str(temp),'SenderTest'],check=True)
 + subprocess.run(['java','-cp',str(temp),'TaskTest'],check=True)
 + subprocess.run(['java','-cp',str(temp),'GiftPolicyTest'],check=True)
+diff --git a/tests/sviri/check_folder_snapshot.py b/tests/sviri/check_folder_snapshot.py
+new file mode 100644
+index 00000000..cff43c79
+--- /dev/null
++++ b/tests/sviri/check_folder_snapshot.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python3
++"""Cold-cache folder membership and destructive queue lifecycle, using production code/API."""
++from pathlib import Path
++import sys, subprocess, tempfile
++root=Path(__file__).resolve().parents[2]
++api=Path(sys.argv[1]) if len(sys.argv)>1 else root/'tdlib/src/main/java/org/drinkless/tdlib/TdApi.java'
++controller=(root/'app/src/main/java/org/thunderdog/challegram/ui/SviriInactiveChatsController.java').read_text()
++def method(sig):
++ a=controller.index(sig);b=controller.index('{',a)+1;depth=1
++ while depth:
++  if controller[b]=='{':depth+=1
++  elif controller[b]=='}':depth-=1
++  b+=1
++ return controller[a:b]
++files={
++'org/thunderdog/challegram/tool/UI.java':'''package org.thunderdog.challegram.tool;import java.util.*;public class UI{static class Job{long time;Runnable r;Job(long t,Runnable a){time=t;r=a;}}static List<Job> jobs=new ArrayList<>();public static long now;public static void post(Runnable r){post(r,0);}public static void post(Runnable r,long d){jobs.add(new Job(now+d,r));}public static void removePendingRunnable(Runnable r){jobs.removeIf(j->j.r==r);}public static void drain(){while(!jobs.isEmpty()){jobs.sort(Comparator.comparingLong(j->j.time));Job j=jobs.remove(0);now=j.time;j.r.run();}}public static void reset(){jobs.clear();now=0;}}''',
++'org/thunderdog/challegram/telegram/Tdlib.java':'''package org.thunderdog.challegram.telegram;import java.util.*;import java.util.function.*;import org.drinkless.tdlib.TdApi;public class Tdlib{public long user=42;public TdApi.ChatFolder folder=new TdApi.ChatFolder();public Map<Long,TdApi.Chat> cache=new HashMap<>();public int pages,gets,leaves,failedAt=-1;public boolean stall;public ArrayList<Long> leaveTimes=new ArrayList<>();public Tdlib(){folder.pinnedChatIds=new long[0];folder.includedChatIds=new long[0];folder.excludedChatIds=new long[0];}public long myUserId(){return user;}public Tdlib client(){return this;}public TdApi.Chat chat(long id){return cache.get(id);}public void send(TdApi.Function<?> f,Consumer<TdApi.Object> cb){if(stall)return;if(f instanceof TdApi.GetChatFolder)cb.accept(folder);else if(f instanceof TdApi.LoadChats){pages++;cb.accept(new TdApi.Error(404,"end"));}else if(f instanceof TdApi.GetChats){TdApi.Chats c=new TdApi.Chats();c.chatIds=new long[]{1,2,3};cb.accept(c);}else if(f instanceof TdApi.GetChat){gets++;long id=((TdApi.GetChat)f).chatId;if(id==failedAt){cb.accept(new TdApi.Error(500,"unavailable"));return;}TdApi.Chat c=new TdApi.Chat();c.id=id;cache.put(id,c);cb.accept(c);}else if(f instanceof TdApi.LeaveChat){leaves++;leaveTimes.add(org.thunderdog.challegram.tool.UI.now);cb.accept(leaves==failedAt?new TdApi.Error(429,"FLOOD_WAIT_60"):new TdApi.Ok());}else throw new AssertionError(f);}}''',
++'org/thunderdog/challegram/telegram/SnapshotTest.java':'''package org.thunderdog.challegram.telegram;import java.util.*;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.tool.UI;public class SnapshotTest{static void check(boolean b){if(!b)throw new AssertionError();}public static void main(String[] a){Tdlib td=new Tdlib();td.folder.pinnedChatIds=new long[]{2,1};td.folder.includedChatIds=new long[400];for(int i=0;i<400;i++)td.folder.includedChatIds[i]=i+1;td.folder.excludedChatIds=new long[]{3};final long[][] out={null};final int[] errors={0};new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(out[0].length==399&&out[0][0]==2&&td.gets==399&&td.pages==0&&errors[0]==0);for(long id:out[0])check(td.chat(id)!=null&&id!=3);
++UI.reset();td=new Tdlib();td.folder.includeGroups=true;out[0]=null;new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(td.pages==1&&out[0].length==3&&td.gets==3);
++UI.reset();td=new Tdlib();td.folder.includedChatIds=new long[]{1,2};td.failedAt=2;out[0]=null;new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(out[0]==null&&errors[0]==1);
++UI.reset();td=new Tdlib();out[0]=null;FolderSnapshot snapshot=new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++);snapshot.start();snapshot.cancel();UI.drain();check(out[0]==null&&errors[0]==1);
++UI.reset();td=new Tdlib();snapshot=new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++);snapshot.start();td.user=43;UI.drain();check(out[0]==null&&errors[0]==1);
++UI.reset();td=new Tdlib();td.stall=true;new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(errors[0]==2);System.out.println("PASS: 400 cold-cache folder IDs, pinned/excluded membership, rule pagination, metadata errors, cancellation, timeout and account isolation");}}''',
++'BatchTest.java':'''import java.util.*;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.Tdlib;import org.thunderdog.challegram.tool.UI;
++class TD{static String toErrorString(TdApi.Object o){return ((TdApi.Error)o).message;}}
++public class BatchTest{Tdlib tdlib=new Tdlib();boolean alive=true,batchRunning,loading,scanning;int batchGeneration,batchCompleted;String error;List<TdApi.Chat> rows=new ArrayList<>();Set<Long> selected=new LinkedHashSet<>();Map<Long,TdApi.Chat> chats=new HashMap<>();Map<Long,Object> samples=new HashMap<>();boolean current(){return alive;}boolean eligible(TdApi.Chat c){return c!=null;}void reload(){}
++'''+method('  private void selectFifty()')+method('  private void leaveNext(')+'''
++static void check(boolean b){if(!b)throw new AssertionError();}void populate(){for(int i=1;i<=130;i++){TdApi.Chat c=new TdApi.Chat();c.id=i;rows.add(c);tdlib.cache.put(c.id,c);chats.put(c.id,c);}}void start(){batchRunning=true;leaveNext(new ArrayDeque<>(selected),++batchGeneration);}public static void main(String[] a){BatchTest t=new BatchTest();t.populate();t.selectFifty();check(t.selected.size()==50&&t.tdlib.leaves==0);t.selectFifty();check(t.selected.size()==100);t.selectFifty();check(t.selected.size()==130);t.start();UI.drain();check(t.batchCompleted==130&&t.selected.isEmpty()&&!t.batchRunning);for(int i=1;i<t.tdlib.leaveTimes.size();i++)check(t.tdlib.leaveTimes.get(i)-t.tdlib.leaveTimes.get(i-1)>=500);
++UI.reset();t=new BatchTest();t.populate();t.selectFifty();t.tdlib.failedAt=3;t.start();UI.drain();check(t.tdlib.leaves==3&&t.batchCompleted==2&&t.selected.size()==48&&!t.batchRunning);
++UI.reset();t=new BatchTest();t.populate();t.selectFifty();t.start();t.batchRunning=false;t.batchGeneration++;UI.drain();check(t.tdlib.leaves==1);
++UI.reset();t=new BatchTest();t.populate();t.selectFifty();t.tdlib.stall=true;t.start();UI.drain();check(!t.batchRunning&&t.selected.size()==50);
++System.out.println("PASS: actual batch methods: 130 selected without network, sequential 500ms leaves, server-error stop, cancellation and timeout preserve remaining selection");}}
++'''
++}
++for name in ('Nullable','NonNull','IntDef'):files['androidx/annotation/'+name+'.java']='package androidx.annotation;public @interface '+name+' {long[] value() default {};boolean flag() default false;}'
++with tempfile.TemporaryDirectory() as tmp:
++ d=Path(tmp)
++ for name,content in files.items():
++  p=d/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(content)
++ sources=[str(d/k) for k in files]+[str(api)]+[str(root/'app/src/main/java/org/thunderdog/challegram/telegram'/name) for name in ('FolderSnapshot.java','FolderForwardLoader.java')]
++ subprocess.run(['java','-Xmx1g','com.sun.tools.javac.Main','-d',tmp,*sources],check=True)
++ for cls in ('org.thunderdog.challegram.telegram.SnapshotTest','BatchTest'):subprocess.run(['java','-cp',tmp,cls],check=True)
 diff --git a/tests/sviri/check_gift_flow.py b/tests/sviri/check_gift_flow.py
 new file mode 100644
 index 00000000..3ca51ef6
@@ -7718,10 +7914,10 @@ index 00000000..9d5b67f3
 + subprocess.run(['java','-cp',str(temp),'PeriodicTest'],check=True)
 diff --git a/tests/sviri/check_slice.py b/tests/sviri/check_slice.py
 new file mode 100644
-index 00000000..bf059162
+index 00000000..32f77c5a
 --- /dev/null
 +++ b/tests/sviri/check_slice.py
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,149 @@
 +#!/usr/bin/env python3
 +"""Exercise the real list slice against small TDLib boundary doubles."""
 +from pathlib import Path
@@ -7741,7 +7937,7 @@ index 00000000..bf059162
 + 'org/drinkless/tdlib/TdApi.java': '''package org.drinkless.tdlib;
 +public class TdApi {
 + public static class Function<T> {}
-+ public static class ChatList {} public static class ChatListFolder extends ChatList { public int chatFolderId; public ChatListFolder(int id){chatFolderId=id;} }
++ public static class ChatList {} public static class ChatListArchive extends ChatList {} public static class ChatListFolder extends ChatList { public int chatFolderId; public ChatListFolder(int id){chatFolderId=id;} }
 + public static class ChatPosition { public long order; public boolean isPinned; public Object source; }
 + public static class Chat { public long id; public ChatPosition position = new ChatPosition(); public Chat(long id){ this.id=id; position.order=10000-id; } }
 +}''',
@@ -7781,7 +7977,7 @@ index 00000000..bf059162
 + TdlibSettingsManager settings = new TdlibSettingsManager(); Map<Long,TdApi.Chat> chats=new HashMap<>();
 + public void ensureTdlibThread(){} public void runOnTdlibThread(Runnable r){r.run();}
 + public TdlibSettingsManager settings(){return settings;}
-+ public TdApi.Chat chat(long id){return chats.get(id);}
++ public long selfChatId(){return 999;} public TdApi.Chat chat(long id){return chats.get(id);}
 + public void chat(long id,Future<TdApi.Function<?>> f,RunnableData<TdApi.Chat> callback){callback.runWithData(chat(id));}
 +}''',
 + 'org/thunderdog/challegram/telegram/TdlibChatList.java': '''package org.thunderdog.challegram.telegram;
@@ -7854,6 +8050,8 @@ index 00000000..bf059162
 +  FolderChatOrder order=new FolderChatOrder(storage);order.remember(new long[]{9,3,9,7});
 +  order=new FolderChatOrder(storage);check(order.rank(9)==0&&order.rank(3)==1&&order.rank(7)==2,"ranks survive recreation and deduplicate");
 +  check(order.rank(1)==3,"new rank appends after restart");
++  order.replace(new long[]{7,9,3});order=new FolderChatOrder(storage);check(order.rank(7)==0&&order.rank(9)==1,"manual activity order persists");
++  td=new Tdlib();td.settings.fixed=true;source=new TdlibChatList(td);source.add(1,false);source.add(999,false);source.end=true;slice=new TdlibChatListSlice(td,source,null,false,null);d=new Display();slice.initializeList(d,d::append,2,null);check(d.ids.get(0)==999L,"Saved Messages first in fixed main list");var stable=new ArrayList<>(d.ids);td.chat(1).position.order=999999;source.listener.onChatMoved(source,td.chat(1),1,0,new Tdlib.ChatChange(td.chat(1).position,15));check(d.ids.equals(stable),"main order freezes new message activity");slice.performDestroy();
 +  System.out.println("PASS: slice pagination, visibility, fixed folder ordering, 200 chats and cleanup");
 + }
 +}'''
@@ -7918,7 +8116,7 @@ index 00000000..2a55a12c
 + subprocess.run(['java','-cp',temp,'StarsStateTest'],check=True)
 diff --git a/tests/sviri/check_startup_presentation.py b/tests/sviri/check_startup_presentation.py
 new file mode 100644
-index 00000000..4afd2bbe
+index 00000000..4eecdee3
 --- /dev/null
 +++ b/tests/sviri/check_startup_presentation.py
 @@ -0,0 +1,29 @@
@@ -7935,7 +8133,7 @@ index 00000000..4afd2bbe
 +  b+=1
 + return source[a:b]
 +java='''import java.util.*;
-+class ThemeManager{static final int CHAT_STYLE_BUBBLES=1;}
++class ThemeManager{static final int CHAT_STYLE_MODERN=1;}
 +class SharedPreferences{Map<String,Object> m=new HashMap<>();boolean getBoolean(String k,boolean d){return (boolean)m.getOrDefault(k,d);}SharedPreferences edit(){return this;}SharedPreferences putBoolean(String k,boolean v){m.put(k,v);return this;}SharedPreferences putInt(String k,int v){m.put(k,v);return this;}void apply(){}}
 +class Settings{static Settings s=new Settings();SharedPreferences p=new SharedPreferences();static Settings instance(){return s;}SharedPreferences pmc(){return p;}}
 +public class StartupTest{
@@ -7945,7 +8143,7 @@ index 00000000..4afd2bbe
 +'''+method(t,'  private void discoverPriorityChats (')+'\n'+method(s,'  private void migrateTelegramPresentation ()')+'''
 +static void check(boolean b){if(!b)throw new AssertionError();}
 +public static void main(String[] args){StartupTest t=new StartupTest();TdlibChatList list=new TdlibChatList();t.discoverPriorityChats(list,1,2);t.drain();check(list.requests==2);list=new TdlibChatList();t.discoverPriorityChats(list,1,8);t.drain();check(list.requests==8);list=new TdlibChatList();list.stalled=true;t.discoverPriorityChats(list,1,2);t.drain();check(list.requests==2);list=new TdlibChatList();t.discoverPriorityChats(list,0,8);check(list.requests==0);t.authorized=false;t.discoverPriorityChats(list,1,8);check(list.requests==0);
-+t.migrateTelegramPresentation();check(!t._forcePlainModeInChannels&&t._chatStyle==1);Settings.instance().pmc().putBoolean("plain1",true);t.migrateTelegramPresentation();check(Settings.instance().pmc().getBoolean("plain1",false));t.account=2;t.migrateTelegramPresentation();check(!Settings.instance().pmc().getBoolean("plain2",true));System.out.println("PASS: actual bounded startup discovery, stalled and stale callbacks; one-time per-account bubble migration preserves later choice");}}
++t.migrateTelegramPresentation();check(t._forcePlainModeInChannels&&t._chatStyle==1);Settings.instance().pmc().putBoolean("plain1",true);t.migrateTelegramPresentation();check(Settings.instance().pmc().getBoolean("plain1",false));t.account=2;t.migrateTelegramPresentation();check(Settings.instance().pmc().getBoolean("plain2",false));System.out.println("PASS: actual bounded startup discovery, stalled and stale callbacks; one-time per-account classic presentation migration preserves later choice");}}
 +'''
 +with tempfile.TemporaryDirectory() as tmp:
 + p=Path(tmp)/'StartupTest.java';p.write_text(java)
