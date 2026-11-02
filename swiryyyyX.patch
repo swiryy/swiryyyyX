@@ -4956,7 +4956,7 @@ index 606de788..de3470c5 100644
        list.performDestroy();
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/SviriFolderToolsController.java b/app/src/main/java/org/thunderdog/challegram/ui/SviriFolderToolsController.java
 new file mode 100644
-index 00000000..46cf979c
+index 00000000..36370909
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/SviriFolderToolsController.java
 @@ -0,0 +1,238 @@
@@ -5135,7 +5135,7 @@ index 00000000..46cf979c
 +        if(!current()||token!=generation)return;
 +        if(target.myUserId()!=expectedUser){transferError(token,"Обраний акаунт змінився. Вибери його повторно.");return;}
 +        loading=false;
-+        if(r instanceof TdApi.ChatFolderInviteLinkInfo){progress="Відкрито перегляд папки в акаунті «"+account.getName()+"». Вступ потрібно підтвердити в наступному вікні.";adapter.notifyItemChanged(0);ChatFolderInviteLinkController controller=new ChatFolderInviteLinkController(context(),target);controller.setArguments(new ChatFolderInviteLinkController.Arguments(link,(TdApi.ChatFolderInviteLinkInfo)r));navigateTo(controller);}
++        if(r instanceof TdApi.ChatFolderInviteLinkInfo){generation++;progress="Відкрито перегляд папки в акаунті «"+account.getName()+"». Вступ потрібно підтвердити в наступному вікні.";adapter.notifyItemChanged(0);ChatFolderInviteLinkController controller=new ChatFolderInviteLinkController(context(),target);controller.setArguments(new ChatFolderInviteLinkController.Arguments(link,(TdApi.ChatFolderInviteLinkInfo)r));controller.show();}
 +        else transferError(token,r instanceof TdApi.Error?TD.toErrorString(r):"Telegram не підтвердив доступ до папки.");
 +      }));
 +    }));
@@ -7804,10 +7804,10 @@ index 00000000..46271787
 + subprocess.run(['java','-cp',str(temp),'GiftPolicyTest'],check=True)
 diff --git a/tests/sviri/check_folder_snapshot.py b/tests/sviri/check_folder_snapshot.py
 new file mode 100644
-index 00000000..7fad4632
+index 00000000..ab7836a9
 --- /dev/null
 +++ b/tests/sviri/check_folder_snapshot.py
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,74 @@
 +#!/usr/bin/env python3
 +"""Cold-cache folder membership and destructive queue lifecycle, using production code/API."""
 +from pathlib import Path
@@ -7824,7 +7824,7 @@ index 00000000..7fad4632
 + return text[a:b]
 +files={
 +'org/thunderdog/challegram/tool/UI.java':'''package org.thunderdog.challegram.tool;import java.util.*;public class UI{static class Job{long time;Runnable r;Job(long t,Runnable a){time=t;r=a;}}static List<Job> jobs=new ArrayList<>();public static long now;public static int errors;public static void showError(org.drinkless.tdlib.TdApi.Object r){errors++;}public static void post(Runnable r){post(r,0);}public static void post(Runnable r,long d){jobs.add(new Job(now+d,r));}public static void removePendingRunnable(Runnable r){jobs.removeIf(j->j.r==r);}public static void drain(){while(!jobs.isEmpty()){jobs.sort(Comparator.comparingLong(j->j.time));Job j=jobs.remove(0);now=j.time;j.r.run();}}public static void reset(){jobs.clear();now=0;}}''',
-+'org/thunderdog/challegram/telegram/Tdlib.java':'''package org.thunderdog.challegram.telegram;import java.util.*;import java.util.function.*;import org.drinkless.tdlib.TdApi;public class Tdlib{public long user=42;public TdApi.ChatFolder folder=new TdApi.ChatFolder();public Map<Long,TdApi.Chat> cache=new HashMap<>();public int pages,gets,leaves,eligibility,creates,failedAt=-1;public long hidden=-1;public boolean holdCopy;public TdApi.ChatFolder lastCopy;public Consumer<TdApi.Object> createCallback;public boolean stall;public ArrayList<Long> leaveTimes=new ArrayList<>();public Tdlib(){folder.pinnedChatIds=new long[0];folder.includedChatIds=new long[0];folder.excludedChatIds=new long[0];}public long myUserId(){return user;}public Tdlib settings(){return this;}public boolean isChatHidden(long id){return id==hidden;}public TdApi.Chat selfChat(){return cache.get(user);}public Tdlib client(){return this;}public TdApi.Chat chat(long id){return cache.get(id);}public void send(TdApi.Function<?> f,Consumer<TdApi.Object> cb){if(stall)return;if(f instanceof TdApi.GetChatFolder)cb.accept(folder);else if(f instanceof TdApi.LoadChats){pages++;cb.accept(new TdApi.Error(404,"end"));}else if(f instanceof TdApi.GetChats){TdApi.Chats c=new TdApi.Chats();c.chatIds=new long[]{1,2,3};cb.accept(c);}else if(f instanceof TdApi.GetChat){gets++;long id=((TdApi.GetChat)f).chatId;if(id==failedAt){cb.accept(new TdApi.Error(500,"unavailable"));return;}TdApi.Chat c=new TdApi.Chat();c.id=id;cache.put(id,c);cb.accept(c);}else if(f instanceof TdApi.CreateChatFolder){creates++;lastCopy=((TdApi.CreateChatFolder)f).folder;createCallback=cb;if(!holdCopy){TdApi.ChatFolderInfo info=new TdApi.ChatFolderInfo();info.id=99;cb.accept(info);}}else if(f instanceof TdApi.GetChatsForChatFolderInviteLink){eligibility++;for(long id:folder.includedChatIds)if(!cache.containsKey(id))throw new AssertionError("eligibility before folder hydration");TdApi.Chats c=new TdApi.Chats();c.chatIds=folder.includedChatIds;cb.accept(c);}else if(f instanceof TdApi.LeaveChat){leaves++;leaveTimes.add(org.thunderdog.challegram.tool.UI.now);cb.accept(leaves==failedAt?new TdApi.Error(429,"FLOOD_WAIT_60"):new TdApi.Ok());}else throw new AssertionError(f);}}''',
++'org/thunderdog/challegram/telegram/Tdlib.java':'''package org.thunderdog.challegram.telegram;import java.util.*;import java.util.function.*;import org.drinkless.tdlib.TdApi;public class Tdlib{public long user=42;public TdApi.ChatFolder folder=new TdApi.ChatFolder();public Map<Long,TdApi.Chat> cache=new HashMap<>();public int pages,gets,leaves,eligibility,creates,failedAt=-1;public long hidden=-1;public boolean authorized=true,holdInit;public Runnable init;public int checks;public Consumer<TdApi.Object> checkCallback;public boolean holdCopy;public TdApi.ChatFolder lastCopy;public Consumer<TdApi.Object> createCallback;public boolean stall;public ArrayList<Long> leaveTimes=new ArrayList<>();public Tdlib(){folder.pinnedChatIds=new long[0];folder.includedChatIds=new long[0];folder.excludedChatIds=new long[0];}public long myUserId(){return user;}public Tdlib settings(){return this;}public boolean isChatHidden(long id){return id==hidden;}public TdApi.Chat selfChat(){return cache.get(user);}public Tdlib client(){return this;}public boolean isAuthorized(){return authorized;}public void awaitInitialization(Runnable r){init=r;if(!holdInit)r.run();}public TdApi.Chat chat(long id){return cache.get(id);}public void send(TdApi.Function<?> f,Consumer<TdApi.Object> cb){if(stall)return;if(f instanceof TdApi.GetChatFolder)cb.accept(folder);else if(f instanceof TdApi.LoadChats){pages++;cb.accept(new TdApi.Error(404,"end"));}else if(f instanceof TdApi.GetChats){TdApi.Chats c=new TdApi.Chats();c.chatIds=new long[]{1,2,3};cb.accept(c);}else if(f instanceof TdApi.GetChat){gets++;long id=((TdApi.GetChat)f).chatId;if(id==failedAt){cb.accept(new TdApi.Error(500,"unavailable"));return;}TdApi.Chat c=new TdApi.Chat();c.id=id;cache.put(id,c);cb.accept(c);}else if(f instanceof TdApi.CheckChatFolderInviteLink){checks++;checkCallback=cb;}else if(f instanceof TdApi.CreateChatFolder){creates++;lastCopy=((TdApi.CreateChatFolder)f).folder;createCallback=cb;if(!holdCopy){TdApi.ChatFolderInfo info=new TdApi.ChatFolderInfo();info.id=99;cb.accept(info);}}else if(f instanceof TdApi.GetChatsForChatFolderInviteLink){eligibility++;for(long id:folder.includedChatIds)if(!cache.containsKey(id))throw new AssertionError("eligibility before folder hydration");TdApi.Chats c=new TdApi.Chats();c.chatIds=folder.includedChatIds;cb.accept(c);}else if(f instanceof TdApi.LeaveChat){leaves++;leaveTimes.add(org.thunderdog.challegram.tool.UI.now);cb.accept(leaves==failedAt?new TdApi.Error(429,"FLOOD_WAIT_60"):new TdApi.Ok());}else throw new AssertionError(f);}}''',
 +'org/thunderdog/challegram/telegram/SnapshotTest.java':'''package org.thunderdog.challegram.telegram;import java.util.*;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.tool.UI;public class SnapshotTest{static void check(boolean b){if(!b)throw new AssertionError();}public static void main(String[] a){Tdlib td=new Tdlib();td.folder.pinnedChatIds=new long[]{2,1};td.folder.includedChatIds=new long[400];for(int i=0;i<400;i++)td.folder.includedChatIds[i]=i+1;td.folder.excludedChatIds=new long[]{3};final long[][] out={null};final int[] errors={0};new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(out[0].length==399&&out[0][0]==2&&td.gets==399&&td.pages==0&&errors[0]==0);for(long id:out[0])check(td.chat(id)!=null&&id!=3);
 +UI.reset();td=new Tdlib();td.folder.includeGroups=true;out[0]=null;new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(td.pages==1&&out[0].length==3&&td.gets==3);
 +UI.reset();td=new Tdlib();td.folder.includedChatIds=new long[]{1,2};td.failedAt=2;out[0]=null;new FolderSnapshot(td,1,ids->out[0]=ids,e->errors[0]++).start();UI.drain();check(out[0]==null&&errors[0]==1);
@@ -7862,6 +7862,18 @@ index 00000000..7fad4632
 +UI.reset();t=new CopyFlowTest();t.tdlib.holdCopy=true;t.createTransferCopy(source,reviewed,0);UI.drain();check(!t.loading&&t.links==0&&t.progress.contains("не підтверджено"));t.tdlib.createCallback.accept(created);UI.drain();check(t.links==0&&t.tdlib.creates==1);
 +UI.reset();t=new CopyFlowTest();t.tdlib.holdCopy=true;t.createTransferCopy(source,reviewed,0);t.tdlib.createCallback.accept(new TdApi.Error(400,"FOLDERS_TOO_MUCH"));UI.drain();check(t.links==0&&!t.loading&&t.tdlib.creates==1&&t.progress.contains("FOLDERS_TOO_MUCH"));System.out.println("PASS: actual static-copy creation: filter detection, 230 chats split by account limit, immutable input, duplicate confirmation, uncertain timeout/late response and server-limit error; no real folders created");}}
 +'''
++files['org/thunderdog/challegram/telegram/TdlibAccount.java']='''package org.thunderdog.challegram.telegram;public class TdlibAccount{public Tdlib target=new Tdlib();public TdlibAccount(){target.user=43;}public String getName(){return "Secondary";}public Tdlib tdlib(){return target;}}'''
++files['ImportFlowTest.java']='''import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;import org.thunderdog.challegram.tool.UI;
++class ChatFolderInviteLinkController{static int shown;static Tdlib shownTarget;Tdlib target;Arguments arguments;ChatFolderInviteLinkController(Object context,Tdlib tdlib){target=tdlib;}static class Arguments{String link;TdApi.ChatFolderInviteLinkInfo info;Arguments(String link,TdApi.ChatFolderInviteLinkInfo info){this.link=link;this.info=info;}}void setArguments(Arguments a){arguments=a;}void show(){if(target.myUserId()!=43||arguments.info==null)throw new AssertionError();shown++;shownTarget=target;}}
++public class ImportFlowTest{Tdlib tdlib=new Tdlib();FolderSnapshot loader;boolean loading,alive=true,transferWritePending;int generation;String progress;String transferLink="https://t.me/addlist/example";static class Adapter{void notifyItemChanged(int i){}void notifyDataSetChanged(){}}Adapter adapter=new Adapter();boolean current(){return alive&&tdlib.myUserId()==42;}void runOnUiThreadOptional(Runnable r){UI.post(r);}Object context(){return this;}
++'''+method('  private void importLink(',tools)+method('  private void transferError(',tools)+'''
++static void check(boolean b){if(!b)throw new AssertionError();}static void reset(){UI.reset();ChatFolderInviteLinkController.shown=0;}public static void main(String[] args){ImportFlowTest t=new ImportFlowTest();TdlibAccount a=new TdlibAccount();t.importLink(a,43,t.transferLink);final Tdlib first=a.target;UI.post(()->{check(first.checks==1);first.checkCallback.accept(new TdApi.ChatFolderInviteLinkInfo());first.checkCallback.accept(new TdApi.ChatFolderInviteLinkInfo());});UI.drain();check(ChatFolderInviteLinkController.shown==1&&ChatFolderInviteLinkController.shownTarget==a.target&&!t.loading);
++reset();t=new ImportFlowTest();a=new TdlibAccount();a.target.authorized=false;t.importLink(a,43,t.transferLink);UI.drain();check(a.target.checks==0&&ChatFolderInviteLinkController.shown==0&&t.progress.contains("увійти"));
++reset();t=new ImportFlowTest();a=new TdlibAccount();a.target.holdInit=true;t.importLink(a,43,t.transferLink);UI.drain();check(!t.loading&&a.target.checks==0&&t.transferLink!=null);a.target.init.run();UI.drain();check(a.target.checks==0&&ChatFolderInviteLinkController.shown==0);
++reset();t=new ImportFlowTest();a=new TdlibAccount();t.importLink(a,43,t.transferLink);final Tdlib target=a.target;UI.post(()->{target.user=44;target.checkCallback.accept(new TdApi.ChatFolderInviteLinkInfo());});UI.drain();check(ChatFolderInviteLinkController.shown==0&&!t.loading);
++reset();t=new ImportFlowTest();a=new TdlibAccount();t.importLink(a,43,t.transferLink);final Tdlib limited=a.target;UI.post(()->limited.checkCallback.accept(new TdApi.Error(400,"CHANNELS_TOO_MUCH")));UI.drain();check(ChatFolderInviteLinkController.shown==0&&t.progress.contains("CHANNELS_TOO_MUCH")&&t.transferLink!=null);
++System.out.println("PASS: actual cross-account import setup: bottom-sheet show on selected account, duplicate callback, sign-in error, timeout/late initialization, changed account and server error; no join requests");}}
++'''
 +for name in ('Nullable','NonNull','IntDef'):files['androidx/annotation/'+name+'.java']='package androidx.annotation;public @interface '+name+' {long[] value() default {};boolean flag() default false;}'
 +with tempfile.TemporaryDirectory() as tmp:
 + d=Path(tmp)
@@ -7869,7 +7881,7 @@ index 00000000..7fad4632
 +  p=d/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(content)
 + sources=[str(d/k) for k in files]+[str(api)]+[str(root/'app/src/main/java/org/thunderdog/challegram/telegram'/name) for name in ('FolderSnapshot.java','FolderForwardLoader.java','FolderTransferPlan.java')]
 + subprocess.run(['java','-Xmx1g','com.sun.tools.javac.Main','-d',tmp,*sources],check=True)
-+ for cls in ('org.thunderdog.challegram.telegram.SnapshotTest','BatchTest','TransferTest','SavedShortcutTest','CopyFlowTest'):subprocess.run(['java','-cp',tmp,cls],check=True)
++ for cls in ('org.thunderdog.challegram.telegram.SnapshotTest','BatchTest','TransferTest','SavedShortcutTest','CopyFlowTest','ImportFlowTest'):subprocess.run(['java','-cp',tmp,cls],check=True)
 diff --git a/tests/sviri/check_gift_flow.py b/tests/sviri/check_gift_flow.py
 new file mode 100644
 index 00000000..3ca51ef6
@@ -8291,7 +8303,7 @@ index 00000000..2a55a12c
 + subprocess.run(['java','-cp',temp,'StarsStateTest'],check=True)
 diff --git a/tests/sviri/check_startup_presentation.py b/tests/sviri/check_startup_presentation.py
 new file mode 100644
-index 00000000..324666a7
+index 00000000..3f4e1a9c
 --- /dev/null
 +++ b/tests/sviri/check_startup_presentation.py
 @@ -0,0 +1,29 @@
@@ -8308,7 +8320,7 @@ index 00000000..324666a7
 +  b+=1
 + return source[a:b]
 +java='''import java.util.*;
-+class ThemeManager{static final int CHAT_STYLE_MODERN=2,CHAT_STYLE_BUBBLES=1;}
++class ThemeManager{static final int CHAT_STYLE_MODERN=1,CHAT_STYLE_BUBBLES=2;}
 +class SharedPreferences{Map<String,Object> m=new HashMap<>();boolean getBoolean(String k,boolean d){return (boolean)m.getOrDefault(k,d);}SharedPreferences edit(){return this;}SharedPreferences putBoolean(String k,boolean v){m.put(k,v);return this;}SharedPreferences putInt(String k,int v){m.put(k,v);return this;}void apply(){}}
 +class Settings{static Settings s=new Settings();SharedPreferences p=new SharedPreferences();static Settings instance(){return s;}SharedPreferences pmc(){return p;}}
 +public class StartupTest{
@@ -8318,7 +8330,7 @@ index 00000000..324666a7
 +'''+method(t,'  private void discoverPriorityChats (')+'\n'+method(s,'  private void migrateTelegramPresentation ()')+'''
 +static void check(boolean b){if(!b)throw new AssertionError();}
 +public static void main(String[] args){StartupTest t=new StartupTest();TdlibChatList list=new TdlibChatList();t.discoverPriorityChats(list,1,2);t.drain();check(list.requests==2);list=new TdlibChatList();t.discoverPriorityChats(list,1,8);t.drain();check(list.requests==8);list=new TdlibChatList();list.stalled=true;t.discoverPriorityChats(list,1,2);t.drain();check(list.requests==2);list=new TdlibChatList();t.discoverPriorityChats(list,0,8);check(list.requests==0);t.authorized=false;t.discoverPriorityChats(list,1,8);check(list.requests==0);
-+Settings.instance().pmc().putBoolean("sviri_original_presentation_v21",true).putBoolean("plain1",true).putInt("style1",2);t.migrateTelegramPresentation();check(!t._forcePlainModeInChannels&&t._chatStyle==1);Settings.instance().pmc().putBoolean("plain1",true);t.migrateTelegramPresentation();check(Settings.instance().pmc().getBoolean("plain1",false));t.account=2;t.migrateTelegramPresentation();check(!Settings.instance().pmc().getBoolean("plain2",true));System.out.println("PASS: actual bounded startup discovery, stalled and stale callbacks; one-time per-account bubble migration from the previous classic setting preserves later choice");}}
++Settings.instance().pmc().putBoolean("sviri_original_presentation_v21",true).putBoolean("plain1",true).putInt("style1",ThemeManager.CHAT_STYLE_MODERN);t.migrateTelegramPresentation();check(!t._forcePlainModeInChannels&&t._chatStyle==ThemeManager.CHAT_STYLE_BUBBLES);Settings.instance().pmc().putBoolean("plain1",true);t.migrateTelegramPresentation();check(Settings.instance().pmc().getBoolean("plain1",false));t.account=2;t.migrateTelegramPresentation();check(!Settings.instance().pmc().getBoolean("plain2",true));System.out.println("PASS: actual bounded startup discovery, stalled and stale callbacks; one-time per-account bubble migration from the previous classic setting preserves later choice");}}
 +'''
 +with tempfile.TemporaryDirectory() as tmp:
 + p=Path(tmp)/'StartupTest.java';p.write_text(java)

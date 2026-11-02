@@ -10,7 +10,7 @@ This update targets the separate **swiryyyyX Test** application (`ua.swiryyyyx.c
 - Folder transfer now detects automatic include/exclude filters, which Telegram does not support in shared folder links. A reviewed static copy is offered with only public supergroups/channels and private supergroups/channels where the source account can manage invite links. The source folder is not edited. Basic groups and private conversations are excluded rather than converted.
 - Large copies are divided into manually chosen parts using the current account folder limit. Each part requires review and confirmation; creating a copy uses a folder slot. Server membership, invite and folder limits remain enforced.
 - Copy creation has a duplicate-request guard, timeout and late-callback protection. Uncertain completion explicitly asks the user to check existing folders before retrying. No automatic retries or actual account changes are performed by the tests.
-- Import setup displays the selected account and reports sign-in problems, server errors and timeouts. The last generated link can be reopened within the same screen without creating another link. Import still uses the native Telegram X preview and separate join confirmation.
+- Import setup displays the selected account and reports sign-in problems, server errors and timeouts. The last generated link can be reopened within the same screen without creating another link. The native Telegram X bottom sheet is opened with its own show method rather than ordinary page navigation; joining still requires separate confirmation.
 
 ## Validation and limits
 
