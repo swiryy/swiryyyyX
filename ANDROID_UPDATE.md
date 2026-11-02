@@ -1,18 +1,21 @@
-# Android Test: replies, folders and stable chat order
+# Android Test: message bubbles, Saved shortcut and folder transfer
 
-This update remains the separate `ua.swiryyyyx.client.test` application, labelled **swiryyyyX Test**. Stable installation and iOS code are preserved. TDLib is unchanged from Test #35.
+This update targets the separate **swiryyyyX Test** application (`ua.swiryyyyx.client.test`). Stable and iOS source files are unchanged. TDLib stays pinned to the Test #37 bundle. Test #37 completed successfully, but its appearance and folder transfer did not satisfy device testing.
 
-## Changes
+## Corrections
 
-- Restore classic message presentation with sender avatars/names. Applied once per account; later appearance choices remain available.
-- Inactive groups/channels: tap to select, add the next 50 repeatedly, review the rows, then confirm leaving the selected chats. Requests run sequentially; stop, timeout and server errors halt the remaining queue. Chat history is not deleted.
-- Replies inbox: fetch the original message and verify that its sender is your account. Plain mentions, bot senders, inline-bot messages and legacy unverified entries are excluded. Hidden-chat and ignored-author filters remain. Replies whose original message is unavailable cannot be verified and are omitted. Manual refresh checks up to 20 unread mention/reply candidates per group; it is not a complete historical search.
-- Folder forwarding: explicit folder IDs are loaded directly, with missing chat metadata resolved in up to eight parallel requests. Remove the full-info request for every supergroup before showing recipients. Rule-based folder membership still comes from paged TDLib loading. Fresh source-message properties and send-time error handling remain.
-- Folder transfer: load complete membership before asking Telegram for invite eligibility, then hydrate eligible chat metadata before review, including a cold cache. Transfer is still limited to chats Telegram allows in a shared folder; private chats, inaccessible groups, permissions and account limits cannot be bypassed.
-- Folder/schedule tools: dedicated configure, review, confirm, cancel and pause controls, Ukrainian status text and recipient review. Android schedules remain approximately every 30 minutes and can be delayed by the OS.
-- Saved Messages sorts first when present in the current list and allowed by its filter. Existing Saved chat metadata is requested at startup without loading its history or changing Telegram pins.
-- Fixed order defaults across main list, archive and folders. Manual activity sorting estimates recent activity from up to 100 messages over seven days, then saves that order locally. New messages do not reshuffle it; new chats append. Hidden chats remain excluded.
+- Message presentation now migrates once to the bubble layout, including channels, with outgoing messages on the right. The new migration also applies over the classic mode forced by Test #37. Later manual appearance choices are preserved. This uses the existing Telegram X bubble renderer; it is not a full port of Telegram Android UI.
+- Saved Messages is prioritised in every forwarding picker folder. Folder recipient review adds a visible Saved shortcut at the first position, without selecting it or changing the reviewed recipient snapshot. Hidden Saved chats stay excluded.
+- Duplicate source-list add events now update an existing row instead of inserting it twice and potentially failing during sorted insertion.
+- Folder transfer now detects automatic include/exclude filters, which Telegram does not support in shared folder links. A reviewed static copy is offered with only public supergroups/channels and private supergroups/channels where the source account can manage invite links. The source folder is not edited. Basic groups and private conversations are excluded rather than converted.
+- Large copies are divided into manually chosen parts using the current account folder limit. Each part requires review and confirmation; creating a copy uses a folder slot. Server membership, invite and folder limits remain enforced.
+- Copy creation has a duplicate-request guard, timeout and late-callback protection. Uncertain completion explicitly asks the user to check existing folders before retrying. No automatic retries or actual account changes are performed by the tests.
+- Import setup displays the selected account and reports sign-in problems, server errors and timeouts. The last generated link can be reopened within the same screen without creating another link. Import still uses the native Telegram X preview and separate join confirmation.
 
-## Validation
+## Validation and limits
 
-Production-code JVM checks cover 400 cold-cache folder recipients, rule-based pagination, cancellation, timeout and account isolation; 130 selected chat exits with no live network operations; stop-on-error and request spacing; Saved-first and persistent ordering; verified reply policy; presentation migration; existing queue, worker, gift and tab-width regressions. Java syntax and XML parsing are checked locally. The Android build and package identity are verified in GitHub Actions. Device testing is still required for appearance and startup latency.
+Local checks exercise the actual presentation migration, the real picker display method, duplicate chat-list events, cold folder metadata, filter routing, account-limit partitioning, copy request cancellation/timeouts and server-limit errors. Existing inbox, hidden-chat, tab-width and gift checks are retained in CI.
+
+No live folders were created and no groups were joined or left during tests. Real-device appearance and cross-account import still require testing with the produced APK. The new Android build is checked in GitHub Actions, including the separate Test package identity.
+
+Scheduled and bulk delivery logic is not modified or claimed to be verified by this change.
