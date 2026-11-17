@@ -434,6 +434,51 @@ index 310fa4f..9118d0b 100644
      int itemWidth = Math.min(parentWidth / items.size(), maxItemWidth);
      if (parentWidth - itemWidth * items.size() < itemWidth / 2) {
        itemWidth = parentWidth / items.size();
+diff --git a/app/src/main/java/org/thunderdog/challegram/sync/SavedAutoForwardWorker.java b/app/src/main/java/org/thunderdog/challegram/sync/SavedAutoForwardWorker.java
+new file mode 100644
+index 0000000..590ab00
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/sync/SavedAutoForwardWorker.java
+@@ -0,0 +1,39 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.sync;
++
++import android.content.Context;
++import androidx.annotation.NonNull;
++import androidx.work.Worker;
++import androidx.work.WorkerParameters;
++import org.thunderdog.challegram.telegram.SavedAutoForward;
++import org.thunderdog.challegram.tool.UI;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.TimeUnit;
++
++public final class SavedAutoForwardWorker extends Worker {
++  public SavedAutoForwardWorker (@NonNull Context context, @NonNull WorkerParameters parameters) { super(context, parameters); }
++  @Override @NonNull public Result doWork () {
++    int account = getInputData().getInt("account", -1);
++    long token = getInputData().getLong("token", 0), due = getInputData().getLong("due", 0);
++    if (account < 0 || isStopped()) return Result.success();
++    CountDownLatch done = new CountDownLatch(1);
++    UI.post(() -> {
++      if (isStopped()) { done.countDown(); return; }
++      try { SavedAutoForward.run(account, token, due, done::countDown); }
++      catch (RuntimeException error) { SavedAutoForward.interrupt(account, token, due); done.countDown(); }
++    });
++    try {
++      if (!done.await(8, TimeUnit.MINUTES)) UI.post(() -> SavedAutoForward.interrupt(account, token, due));
++    } catch (InterruptedException error) {
++      Thread.currentThread().interrupt();
++      UI.post(() -> SavedAutoForward.interrupt(account, token, due));
++    }
++    // Never automatically retry a potentially partially delivered batch.
++    return Result.success();
++  }
++  @Override public void onStopped () {
++    int account = getInputData().getInt("account", -1);
++    long token = getInputData().getLong("token", 0), due = getInputData().getLong("due", 0);
++    UI.post(() -> SavedAutoForward.interrupt(account, token, due));
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java b/app/src/main/java/org/thunderdog/challegram/telegram/ChatLoadRetry.java
 new file mode 100644
 index 0000000..7d6a11e
@@ -706,10 +751,10 @@ index 0000000..7e2c6ac
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardTask.java b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardTask.java
 new file mode 100644
-index 0000000..47a069a
+index 0000000..bd9eca7
 --- /dev/null
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/FolderForwardTask.java
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,81 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +package org.thunderdog.challegram.telegram;
 +
@@ -722,6 +767,7 @@ index 0000000..47a069a
 +import java.util.ArrayList;
 +import java.util.HashMap;
 +import java.util.List;
++import java.util.function.Consumer;
 +
 +/** UI-thread queue owner independent of the dismissed share window. No automatic replay. */
 +public final class FolderForwardTask {
@@ -739,20 +785,32 @@ index 0000000..47a069a
 +  private final ArrayList<Batch> batches;
 +  private final FolderForwardSender sender;
 +  private final FolderForwardQueue queue;
++  private final Consumer<String> completion;
 +
 +  /** Returns an error without starting, or null once ownership has transferred to this task. */
 +  public static String start (Tdlib tdlib, List<Batch> batches) {
++    return start(tdlib, batches, null);
++  }
++  public static String start (Tdlib tdlib, List<Batch> batches, Consumer<String> completion) {
 +    if (active.containsKey(tdlib.id())) return Lang.getString(R.string.SviriFolderBusy);
 +    if (batches.isEmpty()) return Lang.getString(R.string.SviriFolderLoadFailed);
 +    long remaining = Settings.instance().getLong("sviri_forward_cooldown_" + tdlib.id(), 0) - System.currentTimeMillis();
 +    if (remaining > 0) return Lang.getString(R.string.SviriFolderCooldown, (remaining + 999L) / 1000L);
-+    FolderForwardTask task = new FolderForwardTask(tdlib, batches);
++    FolderForwardTask task = new FolderForwardTask(tdlib, batches, completion);
 +    active.put(tdlib.id(), task);
 +    tdlib.incrementJobReferenceCount(JOB_ID);
 +    task.queue.start();
 +    return null;
 +  }
-+  private FolderForwardTask (Tdlib tdlib, List<Batch> batches) {
++  public static void cancel (Tdlib tdlib, Consumer<String> owner) {
++    FolderForwardTask task = active.get(tdlib.id());
++    if (task != null && task.completion == owner) {
++      task.queue.cancel();
++      task.finish("Auto-forward stopped. Already submitted messages may still arrive.");
++    }
++  }
++  private FolderForwardTask (Tdlib tdlib, List<Batch> batches, Consumer<String> completion) {
++    this.completion = completion;
 +    this.tdlib = tdlib; this.sourceUserId = tdlib.myUserId(); this.batches = new ArrayList<>(batches);
 +    sender = new FolderForwardSender(tdlib);
 +    queue = new FolderForwardQueue(batches.size(), (index, callback) -> {
@@ -773,6 +831,7 @@ index 0000000..47a069a
 +    int completed = queue.completed(), total = batches.size();
 +    sender.cancel(); active.remove(tdlib.id()); batches.clear();
 +    tdlib.decrementJobReferenceCount(JOB_ID);
++    if (completion != null) { completion.accept(error); return; }
 +    UI.showToast(error == null ? Lang.getString(R.string.SviriFolderFinished, completed)
 +      : Lang.getString(R.string.SviriFolderStopped, completed, total, error), Toast.LENGTH_LONG);
 +  }
@@ -979,8 +1038,172 @@ index 0000000..275a580
 +    return direct || (!channel && memberCount > 0 && memberCount <= 200);
 +  }
 +}
+diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/SavedAutoForward.java b/app/src/main/java/org/thunderdog/challegram/telegram/SavedAutoForward.java
+new file mode 100644
+index 0000000..066c923
+--- /dev/null
++++ b/app/src/main/java/org/thunderdog/challegram/telegram/SavedAutoForward.java
+@@ -0,0 +1,158 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++package org.thunderdog.challegram.telegram;
++
++import androidx.work.Constraints;
++import androidx.work.Data;
++import androidx.work.ExistingWorkPolicy;
++import androidx.work.NetworkType;
++import androidx.work.OneTimeWorkRequest;
++import androidx.work.WorkManager;
++import org.drinkless.tdlib.TdApi;
++import org.thunderdog.challegram.data.TD;
++import org.thunderdog.challegram.sync.SavedAutoForwardWorker;
++import org.thunderdog.challegram.tool.UI;
++import org.thunderdog.challegram.unsorted.AppContext;
++import org.thunderdog.challegram.unsorted.Settings;
++import tgx.td.ChatId;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.LinkedHashSet;
++import java.util.UUID;
++import java.util.concurrent.TimeUnit;
++import java.util.function.Consumer;
++
++/** UI-thread controller. One durable work item per completed queue, never periodic replay. */
++public final class SavedAutoForward {
++  public static final long DELAY_MS = 300_000L;
++  private static final int WAITING = 1, RUNNING = 2, STOPPED = 0, HEADER = 7;
++  private static final HashMap<Integer, SavedAutoForward> active = new HashMap<>();
++  private final Tdlib tdlib;
++  private final long[] config;
++  private final Runnable done;
++  private final Consumer<String> completion = this::complete;
++  private boolean closed;
++
++  private SavedAutoForward (Tdlib tdlib, long[] config, Runnable done) {
++    this.tdlib = tdlib; this.config = config; this.done = done;
++  }
++  private static String key (int account) { return "sviri_auto_forward_v1_" + account; }
++  private static String tag (int account) { return "sviri-auto-forward:" + account; }
++  private static long[] read (int account) { return Settings.instance().getLongArray(key(account)); }
++  private static boolean valid (long[] c) { return c != null && c.length > HEADER && c[0] > 0; }
++  private static void save (int account, long[] config) { Settings.instance().putLongArray(key(account), config); }
++  public static boolean enabled (Tdlib tdlib) {
++    long[] c = read(tdlib.id());
++    return valid(c) && c[0] == tdlib.myUserId() && c[2] != STOPPED;
++  }
++  public static String start (Tdlib tdlib, long[] recipients, boolean hideAuthor, boolean removeCaptions, boolean silent) {
++    if (!tdlib.isAuthorized()) return "Sign in before starting auto-forward.";
++    if (enabled(tdlib)) return "Auto-forward is already enabled. Stop it before changing recipients.";
++    LinkedHashSet<Long> ids = new LinkedHashSet<>();
++    for (long id : recipients) {
++      if (id == 0 || id == tdlib.selfChatId() || ChatId.isSecret(id) || tdlib.settings().isChatHidden(id))
++        return "Choose visible cloud chats other than Saved Messages.";
++      ids.add(id);
++    }
++    if (ids.isEmpty() || ids.size() > 1000) return "Choose between 1 and 1000 recipients.";
++    long[] c = new long[HEADER + ids.size()];
++    c[0] = tdlib.myUserId(); c[1] = UUID.randomUUID().getMostSignificantBits();
++    c[2] = WAITING; c[3] = System.currentTimeMillis();
++    c[4] = hideAuthor || removeCaptions ? 1 : 0; c[5] = removeCaptions ? 1 : 0; c[6] = silent ? 1 : 0;
++    int index = HEADER; for (long id : ids) c[index++] = id;
++    save(tdlib.id(), c);
++    try { enqueue(tdlib.id(), c); }
++    catch (RuntimeException error) { c[2] = STOPPED; save(tdlib.id(), c); return "Could not schedule auto-forward."; }
++    return null;
++  }
++  private static void enqueue (int account, long[] c) {
++    String name = tag(account) + ":" + c[1] + ":" + c[3];
++    OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(SavedAutoForwardWorker.class)
++      .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
++      .setInitialDelay(Math.max(0L, c[3] - System.currentTimeMillis()), TimeUnit.MILLISECONDS)
++      .setInputData(new Data.Builder().putInt("account", account).putLong("token", c[1]).putLong("due", c[3]).build())
++      .addTag(tag(account)).build();
++    WorkManager.getInstance(AppContext.get()).enqueueUniqueWork(name, ExistingWorkPolicy.KEEP, request);
++  }
++  public static void stop (Tdlib tdlib) {
++    long[] c = read(tdlib.id());
++    if (valid(c)) { c[2] = STOPPED; save(tdlib.id(), c); }
++    SavedAutoForward task = active.get(tdlib.id());
++    if (task != null) task.complete("Auto-forward stopped.");
++    WorkManager.getInstance(AppContext.get()).cancelAllWorkByTag(tag(tdlib.id()));
++  }
++  /** Worker timeout/cancellation must not stop a newer cycle or a manually started queue. */
++  public static void interrupt (int account, long token, long due) {
++    SavedAutoForward task = active.get(account);
++    if (task != null && task.config[1] == token && task.config[3] == due) {
++      task.complete("Auto-forward interrupted; review delivery before restarting.");
++    } else if (task == null) {
++      long[] stored = read(account);
++      if (valid(stored) && stored[1] == token && stored[3] == due) { stored[2] = STOPPED; save(account, stored); }
++    }
++  }
++  public static void run (int account, long token, long due, Runnable done) {
++    long[] c = read(account);
++    if (!valid(c) || c[1] != token || c[3] != due || c[2] == STOPPED || active.containsKey(account)) { done.run(); return; }
++    // A process died during this cycle. Do not risk repeating a partial send.
++    if (c[2] == RUNNING) { c[2] = STOPPED; save(account, c); done.run(); return; }
++    Tdlib tdlib = TdlibManager.getTdlib(account);
++    SavedAutoForward task = new SavedAutoForward(tdlib, c, done);
++    active.put(account, task);
++    c[2] = RUNNING; save(account, c);
++    tdlib.awaitInitialization(() -> UI.post(task::loadLatest));
++  }
++  private boolean current () {
++    long[] stored = read(tdlib.id());
++    return !closed && valid(stored) && stored[1] == config[1] && stored[2] == RUNNING
++      && tdlib.isAuthorized() && tdlib.myUserId() == config[0];
++  }
++  private void loadLatest () {
++    if (!current()) { complete("The signed-in user changed or auto-forward stopped."); return; }
++    if (!tdlib.isConnected()) { tdlib.awaitConnection(() -> UI.post(this::loadLatest)); return; }
++    tdlib.client().send(new TdApi.GetChatHistory(tdlib.selfChatId(), 0, 0, 1, false), result -> UI.post(() -> {
++      if (!current()) { complete("Auto-forward stopped."); return; }
++      if (!(result instanceof TdApi.Messages)) { complete(error(result)); return; }
++      TdApi.Message[] messages = ((TdApi.Messages) result).messages;
++      if (messages == null || messages.length == 0 || messages[0] == null
++          || messages[0].chatId != tdlib.selfChatId() || messages[0].sendingState != null || messages[0].schedulingState != null) {
++        complete("The latest Saved Message is unavailable. Open Saved Messages and try again."); return;
++      }
++      TdApi.Message latest = messages[0];
++      ArrayList<FolderForwardTask.Batch> batches = new ArrayList<>();
++      for (int i = HEADER; i < config.length; i++) {
++        if (tdlib.settings().isChatHidden(config[i])) { complete("A recipient is now hidden. Review recipients."); return; }
++        TdApi.MessageSendOptions options = new TdApi.MessageSendOptions();
++        options.disableNotification = config[6] != 0; options.fromBackground = true;
++        // No paid-message authorization, schedule or inherited payment options.
++        ArrayList<TdApi.Function<?>> functions = new ArrayList<>();
++        TD.forwardMessages(config[i], null, new TdApi.Message[]{latest}, config[4] != 0, config[5] != 0, options, functions);
++        batches.add(new FolderForwardTask.Batch(config[i], functions));
++      }
++      String failure = FolderForwardTask.start(tdlib, batches, completion);
++      if (failure != null) complete(failure);
++    }));
++  }
++  private static String error (TdApi.Object result) {
++    return result instanceof TdApi.Error ? TD.toErrorString(result) : "Unexpected Telegram response.";
++  }
++  private void complete (String error) {
++    if (closed) return;
++    boolean repeat = error == null && current();
++    closed = true;
++    active.remove(tdlib.id());
++    long[] stored = read(tdlib.id());
++    if (valid(stored) && stored[1] == config[1]) {
++      config[2] = repeat ? WAITING : STOPPED;
++      // Delay starts after the final delivery acknowledgement, not at cycle start.
++      config[3] = System.currentTimeMillis() + DELAY_MS;
++      save(tdlib.id(), config);
++      if (repeat) {
++        try { enqueue(tdlib.id(), config); }
++        catch (RuntimeException failure) { config[2] = STOPPED; save(tdlib.id(), config); error = "Could not schedule the next auto-forward."; }
++      }
++    }
++    FolderForwardTask.cancel(tdlib, completion);
++    if (error != null) UI.showToast(error, android.widget.Toast.LENGTH_LONG);
++    done.run();
++  }
++}
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
-index 11c4bfb..6c15959 100644
+index 11c4bfb..525cc3d 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 +++ b/app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java
 @@ -494,6 +494,69 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
@@ -1053,90 +1276,14 @@ index 11c4bfb..6c15959 100644
    private int installedStickerSetLimit = 200;
  
    private int[] favoriteStickerIds;
-@@ -1309,6 +1372,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
-     context().onAuthStateChanged(this, newAuthState, newStatus, myUserId);
-     listeners().updateAuthorizationState(newAuthState);
-     if (newStatus != Status.READY) {
-+      priorityWarmupGeneration++;
-       startupPerformed = false;
-     }
-     setNeedTimeZoneListener(newStatus != Status.UNKNOWN);
-@@ -1467,9 +1531,86 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
-     return startupPerformed;
-   }
- 
-+  private int priorityWarmupGeneration;
-+
-+  private void rememberPriorityChat (TdApi.Chat chat) {
-+    if (chat == null) return;
-+    boolean direct = false, channel = false;
-+    int members = 0;
-+    switch (chat.type.getConstructor()) {
-+      case TdApi.ChatTypePrivate.CONSTRUCTOR:
-+      case TdApi.ChatTypeSecret.CONSTRUCTOR:
-+        direct = true;
-+        break;
-+      case TdApi.ChatTypeBasicGroup.CONSTRUCTOR: {
-+        TdApi.BasicGroup group = cache().basicGroup(((TdApi.ChatTypeBasicGroup) chat.type).basicGroupId);
-+        members = group != null ? group.memberCount : 0;
-+        break;
-+      }
-+      case TdApi.ChatTypeSupergroup.CONSTRUCTOR: {
-+        TdApi.ChatTypeSupergroup type = (TdApi.ChatTypeSupergroup) chat.type;
-+        channel = type.isChannel;
-+        TdApi.Supergroup group = cache().supergroup(type.supergroupId);
-+        members = group != null ? group.memberCount : 0;
-+        if (members == 0 && !channel) {
-+          TdApi.SupergroupFullInfo full = cache().supergroupFull(type.supergroupId, false);
-+          if (full != null) members = full.memberCount;
-+        }
-+        break;
-+      }
-+    }
-+    settings().rememberPriorityChat(chat.id, PriorityChatPolicy.eager(direct, channel, members));
-+  }
-+
-+  private void restorePriorityChats (long[] ids, int offset, int generation) {
-+    if (generation != priorityWarmupGeneration || !isAuthorized() || offset >= ids.length) return;
-+    int end = Math.min(offset + 16, ids.length);
-+    java.util.concurrent.atomic.AtomicInteger remaining = new java.util.concurrent.atomic.AtomicInteger(end - offset);
-+    for (int i = offset; i < end; i++) {
-+      // GetChat reads TDLib's local chat database; it does not download histories.
-+      send(new TdApi.GetChat(ids[i]), (chat, error) -> {
-+        if (remaining.decrementAndGet() == 0) {
-+          restorePriorityChats(ids, end, generation);
-+        }
-+      });
-+    }
-+  }
-+
-+  private void discoverPriorityChats (TdlibChatList list, int generation) {
-+    if (generation != priorityWarmupGeneration || !isAuthorized() || list.isEndReached()) return;
-+    int before = list.count(null);
-+    list.loadMore(50, () -> {
-+      if (generation != priorityWarmupGeneration || !isAuthorized() || list.isEndReached()) return;
-+      // Yield between metadata pages; retry backoff still belongs to the source list.
-+      double delay = list.count(null) > before ? .15 : 2.0;
-+      runOnTdlibThread(() -> discoverPriorityChats(list, generation), delay, false);
-+    });
-+  }
-+
+@@ -1470,6 +1533,18 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
    private void onPerformStartup () {
      Log.i("Performing account startup for accountId:%d, isAfterRestart:%b", accountId, startupPerformed);
      listeners().performStartup(startupPerformed);
 +    if (!startupPerformed) {
-+      int generation = ++priorityWarmupGeneration;
-+      long[] saved = settings().priorityChatIds();
-+      long[] ordered = new long[saved.length];
-+      int offset = 0;
-+      for (long id : saved) if (ChatId.isUserChat(id)) ordered[offset++] = id;
-+      for (long id : saved) if (!ChatId.isUserChat(id)) ordered[offset++] = id;
-+      restorePriorityChats(ordered, 0, generation);
-+      // First login must discover IDs through TDLib's ordered metadata lists.
-+      runOnTdlibThread(() -> {
-+        discoverPriorityChats(chatList(ChatPosition.CHAT_LIST_MAIN), generation);
-+        discoverPriorityChats(chatList(ChatPosition.CHAT_LIST_ARCHIVE), generation);
-+      }, .3, false);
++      // Visible lists paginate on demand. Do not scan the main list/archive or
++      // restore every indexed chat while TDLib is connecting and applying updates.
++      // Hidden metadata is still needed to filter local counters and notifications.
 +      for (long chatId : settings().hiddenChatIds()) {
 +        if (chat(chatId) == null) {
 +          send(new TdApi.GetChat(chatId), (chat, error) -> {
@@ -1148,16 +1295,15 @@ index 11c4bfb..6c15959 100644
      startupPerformed = true;
    }
  
-@@ -7778,6 +7919,8 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7778,6 +7853,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
          chatList.onUpdateNewChat(update.chat);
        }
      }
-+    rememberPriorityChat(update.chat);
 +    refreshHiddenChatCounters(update.chat.id);
    }
  
    public void refreshChatState (long chatId) {
-@@ -7897,6 +8040,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -7897,6 +7973,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        listChanges = setChatPositions(chat, update.positions);
      }
      listeners.updateChatLastMessage(update, listChanges);
@@ -1165,7 +1311,7 @@ index 11c4bfb..6c15959 100644
    }
  
    public static int CHAT_MARKED_AS_UNREAD = -1;
-@@ -8092,6 +8236,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8092,6 +8169,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      }
      if (chatListChange != null) {
        listeners.updateChatPosition(update, chatListChange);
@@ -1173,7 +1319,7 @@ index 11c4bfb..6c15959 100644
      }
    }
  
-@@ -8119,6 +8264,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8119,6 +8197,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chat.chatLists = list.toArray(new TdApi.ChatList[0]);
      }
      listeners.updateChatAddedToList(update);
@@ -1181,7 +1327,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @TdlibThread
-@@ -8145,6 +8291,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8145,6 +8224,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chat.chatLists = ArrayUtils.removeElement(oldChatLists, foundIndex, new TdApi.ChatList[oldChatLists.length - 1]);
      }
      listeners.updateChatRemovedFromList(update);
@@ -1189,7 +1335,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @TdlibThread
-@@ -8337,6 +8484,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8337,6 +8417,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
        chatLists = chatListsImpl(chat.positions);
      }
      listeners.updateChatReadInbox(update, availabilityChanged, chat, chatLists);
@@ -1197,7 +1343,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @TdlibThread
-@@ -8477,6 +8625,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8477,6 +8558,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      }
  
      listeners.updateChatIsMarkedAsUnread(update);
@@ -1205,7 +1351,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @TdlibThread
-@@ -8845,12 +8994,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -8845,12 +8927,14 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
      listeners.updateNotificationSettings(update);
      notificationManager.onUpdateNotificationSettings(update, chatId, oldNotificationSettings);
@@ -1220,15 +1366,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @TdlibThread
-@@ -8893,6 +9044,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
-       }
-     }
-     cache.onUpdateSupergroup(update, chat);
-+    rememberPriorityChat(chat);
-   }
- 
-   // Updates: SECURITY
-@@ -9490,9 +9642,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9490,9 +9574,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      counter.messageCount = unreadMessageCount;
      counter.messageUnmutedCount = unreadUnmutedCount;
  
@@ -1241,7 +1379,7 @@ index 11c4bfb..6c15959 100644
  
      return true;
    }
-@@ -9511,9 +9664,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9511,9 +9596,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      int oldTotalChatCount = counter.totalChatCount;
  
      if (counter.setChatCounters(totalCount, unreadChatCount, unreadUnmutedCount, markedAsUnreadCount, markedAsUnreadUnmutedCount)) {
@@ -1254,7 +1392,7 @@ index 11c4bfb..6c15959 100644
        return true;
      }
  
-@@ -9528,7 +9682,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9528,7 +9614,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @AnyThread
    public TdlibCounter getMainCounter () {
@@ -1263,7 +1401,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @AnyThread
-@@ -9548,7 +9702,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9548,7 +9634,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
  
    @AnyThread
    public boolean hasUnreadChats (@NonNull TdApi.ChatList chatList) {
@@ -1272,7 +1410,7 @@ index 11c4bfb..6c15959 100644
    }
  
    @AnyThread
-@@ -9574,9 +9728,52 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
+@@ -9574,9 +9660,52 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
      // TODO ?
    }
  
@@ -1326,22 +1464,6 @@ index 11c4bfb..6c15959 100644
    }
  
    @TdlibThread
-@@ -10289,6 +10486,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
-       // Groups
-       case TdApi.UpdateBasicGroup.CONSTRUCTOR: {
-         cache.onUpdateBasicGroup((TdApi.UpdateBasicGroup) update);
-+        rememberPriorityChat(chat(ChatId.fromBasicGroupId(((TdApi.UpdateBasicGroup) update).basicGroup.id)));
-         break;
-       }
-       case TdApi.UpdateBasicGroupFullInfo.CONSTRUCTOR: {
-@@ -10306,6 +10504,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
-       case TdApi.UpdateSupergroupFullInfo.CONSTRUCTOR: {
-         TdApi.UpdateSupergroupFullInfo updateSupergroupFullInfo = (TdApi.UpdateSupergroupFullInfo) update;
-         cache.onUpdateSupergroupFull(updateSupergroupFullInfo);
-+        rememberPriorityChat(chat(ChatId.fromSupergroupId(updateSupergroupFullInfo.supergroupId)));
-         refreshChatState(ChatId.fromSupergroupId(updateSupergroupFullInfo.supergroupId));
-         break;
-       }
 diff --git a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java b/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
 index b2a472d..864eed4 100644
 --- a/app/src/main/java/org/thunderdog/challegram/telegram/TdlibBadgeCounter.java
@@ -2110,7 +2232,7 @@ index 9f7fc1a..2d41071 100644
        return unreadCounter;
      }
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
-index 070ed21..ab0fa11 100644
+index 070ed21..71eb09f 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ChatsController.java
 @@ -156,7 +156,7 @@ public class ChatsController extends TelegramViewController<ChatsController.Argu
@@ -2157,7 +2279,7 @@ index 070ed21..ab0fa11 100644
 +        adapter.setNeedArchive(tdlib.getVisibleCounter(ChatPosition.CHAT_LIST_ARCHIVE).totalChatCount > 0);
          archiveList.subscribeToUpdates(archiveListListener);
 -        archiveList.loadAtLeast(null, 3, null);
-+        archiveList.loadAtLeast(chat -> !tdlib.settings().isChatHidden(chat.id), 3, null);
++        // Archive previews use cached metadata; opening the archive loads its list.
          tdlib.settings().addUserPreferenceChangeListener(this);
        }
      }
@@ -3220,28 +3342,29 @@ index 0000000..0097add
 +  @Override public void destroy () { generation++; tdlib.removeStarAmountListener(balanceListener); super.destroy(); }
 +}
 diff --git a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
-index 606de78..561354e 100644
+index 606de78..115e846 100644
 --- a/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
 +++ b/app/src/main/java/org/thunderdog/challegram/ui/ShareController.java
-@@ -78,6 +78,8 @@ import org.thunderdog.challegram.navigation.ViewController;
+@@ -78,6 +78,9 @@ import org.thunderdog.challegram.navigation.ViewController;
  import org.thunderdog.challegram.support.RippleSupport;
  import org.thunderdog.challegram.support.ViewSupport;
  import org.thunderdog.challegram.telegram.ChatListListener;
 +import org.thunderdog.challegram.telegram.FolderForwardLoader;
 +import org.thunderdog.challegram.telegram.FolderForwardTask;
++import org.thunderdog.challegram.telegram.SavedAutoForward;
  import org.thunderdog.challegram.telegram.RightId;
  import org.thunderdog.challegram.telegram.TGLegacyManager;
  import org.thunderdog.challegram.telegram.Tdlib;
-@@ -392,7 +394,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -392,7 +395,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private int getMenuItemCount () {
 -    int count = 1;
-+    int count = 1 + (mode == MODE_MESSAGES ? 1 : 0) + (canForwardSavedToFolder() ? 1 : 0) + (canCopyLink() ? 1 : 0);
++    int count = 1 + (mode == MODE_MESSAGES ? 1 : 0) + (canForwardSavedToFolder() ? 1 : 0) + (isForwardingSavedMessages() ? 1 : 0) + (canCopyLink() ? 1 : 0);
      if (canExportContent()) {
        count++;
      }
-@@ -402,6 +404,15 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -402,9 +405,22 @@ public class ShareController extends TelegramViewController<ShareController.Args
    @Override
    public void fillMenuItems (int id, HeaderView header, LinearLayout menu) {
      if (id == R.id.menu_search) {
@@ -3257,11 +3380,19 @@ index 606de78..561354e 100644
        if (canCopyLink()) {
          header.addButton(menu, R.id.menu_btn_copy, getHeaderIconColorId(), this, R.drawable.baseline_link_24, Screen.dp(49f), R.drawable.bg_btn_header);
        }
-@@ -437,7 +448,16 @@ public class ShareController extends TelegramViewController<ShareController.Args
++      if (isForwardingSavedMessages()) {
++        HeaderButton auto = header.addButton(menu, R.id.menu_btn_sviriAutoForward, getHeaderIconColorId(), this, R.drawable.baseline_date_range_24, Screen.dp(49f), R.drawable.bg_btn_header);
++        auto.setContentDescription(Lang.getString(R.string.SviriAutoForward));
++      }
+       int exportState = getExportContentState();
+       if (exportState != EXPORT_NONE) {
+         header.addButton(menu, R.id.menu_btn_forward, getHeaderIconColorId(), this, R.drawable.baseline_share_24, Screen.dp(49f), R.drawable.bg_btn_header);
+@@ -437,7 +453,17 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    @Override
    public void onMenuItemPressed (int id, View view) {
 -    if (id == R.id.menu_btn_search) {
++    if (id == R.id.menu_btn_sviriAutoForward) { showAutoForward(); return; }
 +    if (folderForwardRunning) return;
 +    if (id == R.id.menu_btn_sviriForwardFolder) {
 +      if (!folderForwardLoading && !folderForwardRunning && !isSent) {
@@ -3275,7 +3406,7 @@ index 606de78..561354e 100644
        if (getDisplayingChats() != null) {
          openSearchMode();
        }
-@@ -446,7 +466,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -446,7 +472,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
      } else if (id == R.id.menu_btn_forward) {
        exportContent();
      } else if (id == R.id.btn_menu_customize) {
@@ -3284,7 +3415,7 @@ index 606de78..561354e 100644
      } else if (id == R.id.menu_btn_clear) {
        clearSearchInput();
      }
-@@ -1519,7 +1539,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1519,7 +1545,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        if (displayingChats != null) {
          TGFoundChat parsedChat = newChat(chatList.chatList(), chat);
          displayingChats.add(atIndex, parsedChat);
@@ -3293,7 +3424,7 @@ index 606de78..561354e 100644
            if (isEmptyItem(adapter.getItem(0))) {
              adapter.removeItem(0);
            }
-@@ -1536,7 +1556,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1536,7 +1562,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        List<TGFoundChat> displayingChats = getChatsByChatList(chatList.chatList());
        if (displayingChats != null) {
          displayingChats.remove(fromIndex);
@@ -3302,7 +3433,7 @@ index 606de78..561354e 100644
            adapter.removeItem(fromIndex);
            recyclerView.invalidateItemDecorations();
          }
-@@ -1551,7 +1571,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1551,7 +1577,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        if (displayingChats != null) {
          TGFoundChat entry = displayingChats.remove(fromIndex);
          displayingChats.add(toIndex, entry);
@@ -3311,7 +3442,7 @@ index 606de78..561354e 100644
            LinearLayoutManager manager = (LinearLayoutManager) recyclerView.getLayoutManager();
            int savedPosition, savedOffset;
            if (manager != null) {
-@@ -1968,7 +1988,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -1968,7 +1994,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    private boolean toggleCheckedImpl (View view, TGFoundChat chat, @Nullable RunnableBool after, boolean performAsyncChecks) {
      long chatId = chat.getAnyId();
@@ -3320,7 +3451,7 @@ index 606de78..561354e 100644
        return false;
      }
  
-@@ -2019,6 +2039,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2019,6 +2045,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void updateHeader () {
@@ -3331,7 +3462,7 @@ index 606de78..561354e 100644
      if (selectedChats.size() == 0) {
        headerCell.setSubtitle(Lang.lowercase(Lang.getString(R.string.SelectChats)));
      } else if (selectedChats.size() == 1) {
-@@ -2466,8 +2490,20 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2466,8 +2496,20 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void displayChatList (CharSequence title, TdApi.ChatList chatList) {
@@ -3353,7 +3484,7 @@ index 606de78..561354e 100644
      headerCell.setTitle(StringUtils.isEmptyOrBlank(title) ? getName() : title);
      displayingChatList = chatList;
      if (getListByChatList(chatList) != null) {
-@@ -2495,7 +2531,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2495,7 +2537,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
        displayingChats.addAll(chats);
      }
  
@@ -3362,7 +3493,7 @@ index 606de78..561354e 100644
        if (isEmptyItem(adapter.getItem(0))) {
          adapter.getItems().remove(0);
          adapter.notifyItemRemoved(0);
-@@ -2969,7 +3005,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -2969,7 +3011,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    private void checkAbilityToSend () {
      final int selectedCount = selectedChats.size();
@@ -3371,7 +3502,7 @@ index 606de78..561354e 100644
  
      if (canShareLink) {
        sendButton.setIsReady(isReady, true);
-@@ -3296,6 +3332,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3296,6 +3338,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void showShareSettings (TdApi.MessageProperties[] messageProperties) {
@@ -3379,7 +3510,7 @@ index 606de78..561354e 100644
      boolean canRemoveCaptions = false;
      int canSendWithoutSound = 0;
      boolean hasSecretChats = false;
-@@ -3304,10 +3341,11 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3304,10 +3347,11 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
      if (mode == MODE_MESSAGES) {
        Args args = getArgumentsStrict();
@@ -3392,7 +3523,7 @@ index 606de78..561354e 100644
            canBeCopied = false;
            break;
          }
-@@ -3316,9 +3354,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3316,9 +3360,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
          }
        }
        if (canBeCopied) {
@@ -3404,7 +3535,7 @@ index 606de78..561354e 100644
          }
        }
      }
-@@ -3345,8 +3383,8 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3345,8 +3389,8 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
      ListItem[] itemsArray = items.toArray(new ListItem[0]);
      showSettings(R.id.btn_menu_customize, itemsArray, (id, result) -> {
@@ -3414,7 +3545,7 @@ index 606de78..561354e 100644
        forceSendWithoutSound = result.get(R.id.btn_sendNoSound) == R.id.btn_sendNoSound;
      });
    }
-@@ -3361,7 +3399,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3361,7 +3405,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void sendMessages (boolean forceGoToChat, boolean isSingleTap, @Nullable TdApi.MessageSendOptions finalSendOptions, boolean reloadProperties) {
@@ -3423,7 +3554,7 @@ index 606de78..561354e 100644
        return;
      }
  
-@@ -3373,12 +3411,17 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3373,12 +3417,17 @@ public class ShareController extends TelegramViewController<ShareController.Args
      // Double check if there are any new restrictions
      for (int i = 0; i < selectedChats.size(); i++) {
        long chatId = selectedChats.valueAt(i).getChatId();
@@ -3441,7 +3572,7 @@ index 606de78..561354e 100644
      final TdApi.FormattedText comment = inputView.getOutputText(true);
  
      //noinspection UnsafeOptInUsageError
-@@ -3392,6 +3435,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3392,6 +3441,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
      for (int i = 0; i < selectedChatIds.size(); i++) {
        final long chatId = selectedChatIds.get(i);
@@ -3449,7 +3580,7 @@ index 606de78..561354e 100644
        if (showErrorMessage(null, chatId, true))
          return;
  
-@@ -3504,8 +3548,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3504,8 +3554,10 @@ public class ShareController extends TelegramViewController<ShareController.Args
          default:
            return;
        }
@@ -3460,7 +3591,7 @@ index 606de78..561354e 100644
      if (functions.size() == 1) {
        tdlib.client().send(functions.get(0), tdlib.messageHandler());
      } else {
-@@ -3660,6 +3706,171 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3660,6 +3712,209 @@ public class ShareController extends TelegramViewController<ShareController.Args
      }
    }
  
@@ -3479,11 +3610,49 @@ index 606de78..561354e 100644
 +  private FolderForwardLoader folderForwardLoader;
 +
 +  private boolean canForwardSavedToFolder () {
-+    if (mode != MODE_MESSAGES || tdlib.chatFolderCount() == 0) return false;
++    return tdlib.chatFolderCount() != 0 && isForwardingSavedMessages();
++  }
++
++  private boolean isForwardingSavedMessages () {
++    if (mode != MODE_MESSAGES) return false;
 +    Args args = getArguments();
 +    if (args == null || args.messages == null || args.messages.length == 0) return false;
 +    for (TdApi.Message message : args.messages) if (!tdlib.isSelfChat(message.chatId)) return false;
 +    return true;
++  }
++
++  private void showAutoForward () {
++    if (!isForwardingSavedMessages() || isDestroyed()) return;
++    if (SavedAutoForward.enabled(tdlib)) {
++      showOptions(Lang.getString(R.string.SviriAutoForwardActive),
++        new int[]{R.id.btn_sviriStopAutoForward, R.id.btn_cancel},
++        new String[]{Lang.getString(R.string.SviriAutoForwardStop), Lang.getString(R.string.Cancel)}, null,
++        new int[]{R.drawable.baseline_cancel_24, R.drawable.baseline_cancel_24}, (v, action) -> {
++          if (action == R.id.btn_sviriStopAutoForward) SavedAutoForward.stop(tdlib);
++          return true;
++        });
++      return;
++    }
++    if (isSent || folderForwardLoading || folderForwardRunning || selectedChats.size() == 0) {
++      UI.showToast(R.string.SviriAutoForwardSelect, Toast.LENGTH_LONG); return;
++    }
++    final long userId = tdlib.myUserId();
++    final long[] recipients = new long[selectedChatIds.size()];
++    for (int i = 0; i < recipients.length; i++) {
++      recipients[i] = selectedChatIds.get(i);
++      if (showErrorMessage(null, recipients[i], true)) return;
++    }
++    final boolean hide = needHideAuthor, captions = needRemoveCaptions, silent = forceSendWithoutSound;
++    showOptions(Lang.getString(R.string.SviriAutoForwardConfirm, recipients.length),
++      new int[]{R.id.btn_sviriStartAutoForward, R.id.btn_cancel},
++      new String[]{Lang.getString(R.string.SviriAutoForwardStart), Lang.getString(R.string.Cancel)}, null,
++      new int[]{R.drawable.baseline_date_range_24, R.drawable.baseline_cancel_24}, (v, action) -> {
++        if (action != R.id.btn_sviriStartAutoForward || isDestroyed() || isSent || userId != tdlib.myUserId()) return true;
++        String failure = SavedAutoForward.start(tdlib, recipients, hide, captions, silent);
++        if (failure != null) UI.showToast(failure, Toast.LENGTH_LONG);
++        else { UI.showToast(R.string.SviriAutoForwardStarted, Toast.LENGTH_LONG); onSent(); popupLayout.hideWindow(true); }
++        return true;
++      });
 +  }
 +
 +  private void showForwardFolderSelector () {
@@ -3632,7 +3801,7 @@ index 606de78..561354e 100644
    private @Nullable PopupLayout folderSelectorLayout;
  
    private static class FolderMenuWrap extends MenuMoreWrap {
-@@ -3682,6 +3893,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3682,6 +3937,7 @@ public class ShareController extends TelegramViewController<ShareController.Args
    }
  
    private void showFolderSelector () {
@@ -3640,7 +3809,7 @@ index 606de78..561354e 100644
      if (headerView == null)
        return;
      FolderMenuWrap menu = new FolderMenuWrap(context);
-@@ -3720,6 +3932,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
+@@ -3720,6 +3976,9 @@ public class ShareController extends TelegramViewController<ShareController.Args
  
    @Override
    public void destroy () {
@@ -4452,7 +4621,7 @@ index 0000000..a013a63
 +iconActive, textLink, chatListAction, chatSendButton, online, progress, badge, circleButtonRegular, circleButtonChat, checkActive, inputActive, ticksRead: #339FED
 +circleButtonRegularIcon, circleButtonChatIcon, badgeText: #FFFFFF
 diff --git a/app/src/main/res/values/ids.xml b/app/src/main/res/values/ids.xml
-index 98ed3d2..c28515f 100644
+index 98ed3d2..2323f88 100644
 --- a/app/src/main/res/values/ids.xml
 +++ b/app/src/main/res/values/ids.xml
 @@ -1,5 +1,11 @@
@@ -4467,7 +4636,7 @@ index 98ed3d2..c28515f 100644
    <item type="id" name="app_root" />
    <item type="id" name="app_container" />
  
-@@ -1433,4 +1439,17 @@
+@@ -1433,4 +1439,20 @@
    <item type="id" name="btn_playback_speed_1_2" />
    <item type="id" name="btn_playback_speed_1_5" />
    <item type="id" name="btn_playback_speed_2_0" />
@@ -4484,10 +4653,13 @@ index 98ed3d2..c28515f 100644
 +  <item type="id" name="btn_sviriTransferGift" />
 +  <item type="id" name="btn_sviriFixedFolderOrder" />
 +  <item type="id" name="controller_sviriGiftDetails" />
++  <item type="id" name="menu_btn_sviriAutoForward" />
++  <item type="id" name="btn_sviriStartAutoForward" />
++  <item type="id" name="btn_sviriStopAutoForward" />
  </resources>
 \ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index 416f9af..7f1d3e6 100644
+index 416f9af..dab086e 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,15 @@
@@ -4506,7 +4678,7 @@ index 416f9af..7f1d3e6 100644
    <string name="language_continueInLanguage">Continue in English</string>
  
    <string name="Page1Title">Telegram X</string>
-@@ -5909,4 +5919,86 @@
+@@ -5909,4 +5919,93 @@
    <string name="RestrictedContent">Restricted Content</string>
    <string name="SensitiveContent">Sensitive Content</string>
  
@@ -4592,6 +4764,13 @@ index 416f9af..7f1d3e6 100644
 +  <string name="SviriRarityEpic">Epic</string>
 +  <string name="SviriRarityLegendary">Legendary</string>
 +  <string name="SviriGiftTransferFee">Transfer fee</string>
++  <string name="SviriAutoForward">Автопересилання зі Збережених</string>
++  <string name="SviriAutoForwardSelect">Спочатку вибери отримувачів або папку.</string>
++  <string name="SviriAutoForwardConfirm">Запустити автопересилання у %1$d вибраних чатів? Перший цикл почнеться зараз. Після завершення всієї черги — пауза 5 хвилин, потім новий цикл з останнім повідомленням зі Збережених. Якщо нових повідомлень немає, попереднє пересилається знову. Вибрані повідомлення та коментар не використовуються. Зберігається поточний список отримувачів; зміни папки не додають нових. Android може затримати фоновий запуск. Помилка зупиняє цикл.</string>
++  <string name="SviriAutoForwardStart">Запустити</string>
++  <string name="SviriAutoForwardStop">Зупинити автопересилання</string>
++  <string name="SviriAutoForwardActive">Автопересилання ввімкнене: останнє повідомлення зі Збережених, пауза 5 хвилин після всієї черги. Уже передані Telegram повідомлення можуть дійти після зупинки.</string>
++  <string name="SviriAutoForwardStarted">Автопересилання ввімкнено. Щоб зупинити, відкрий пересилання зі Збережених і натисни календар.</string>
  </resources>
 diff --git a/build-swiryyyyX.ps1 b/build-swiryyyyX.ps1
 new file mode 100644
@@ -4887,6 +5066,101 @@ index 0000000..568aa9a
 +    System.out.println("PASS: visible counts, muted/marked overlap, unknown values, overflow and network retry timeline");
 +  }
 +}
+diff --git a/tests/sviri/check_auto_forward.py b/tests/sviri/check_auto_forward.py
+new file mode 100644
+index 0000000..5406151
+--- /dev/null
++++ b/tests/sviri/check_auto_forward.py
+@@ -0,0 +1,89 @@
++#!/usr/bin/env python3
++"""Run the real auto-forward controller/queue against pinned TDLib and Android boundary doubles."""
++from pathlib import Path
++import runpy
++import subprocess
++import tempfile
++
++root = Path(__file__).resolve().parents[2]
++base = runpy.run_path(str(root / 'tests/sviri/check_folder_sender.py'))
++files = dict(base['files'])
++files['org/thunderdog/challegram/unsorted/Settings.java'] = files['org/thunderdog/challegram/unsorted/Settings.java'].replace(
++    'static final Settings INSTANCE', 'Map<String,long[]> arrays=new HashMap<>(); public long[] getLongArray(String k){long[] v=arrays.get(k);return v==null?null:v.clone();} public void putLongArray(String k,long[] v){arrays.put(k,v.clone());} static final Settings INSTANCE')
++files['org/thunderdog/challegram/telegram/Tdlib.java'] = files['org/thunderdog/challegram/telegram/Tdlib.java'].replace(
++    'public interface Handler', '''public TdApi.Function<?> lastFunction; public boolean authorized=true,connected=true;
++    public boolean isAuthorized(){return authorized;}public boolean isConnected(){return connected;}
++    public long selfChatId(){return 999;}public void awaitInitialization(Runnable r){r.run();}
++    public void awaitConnection(Runnable r){throw new AssertionError("unexpected disconnected test");}
++    public interface Handler''').replace('sends++;reply=h;', 'sends++;lastFunction=f;reply=h;')
++files['org/thunderdog/challegram/data/TD.java'] = files['org/thunderdog/challegram/data/TD.java'].replace(
++    'public static String', '''public static boolean forwardMessages(long chat,TdApi.MessageTopic topic,TdApi.Message[] messages,boolean copy,boolean caption,TdApi.MessageSendOptions options,java.util.ArrayList<TdApi.Function<?>> out){out.add(new TdApi.ForwardMessages(chat,topic,messages[0].chatId,new long[]{messages[0].id},options,copy,caption));return true;} public static String''')
++files.update({
++ 'tgx/td/ChatId.java': 'package tgx.td;public class ChatId {public static boolean isSecret(long id){return id < -1000000000000L;}}',
++ 'android/content/Context.java': 'package android.content;public class Context {}',
++ 'org/thunderdog/challegram/unsorted/AppContext.java': 'package org.thunderdog.challegram.unsorted;public class AppContext {public static android.content.Context get(){return new android.content.Context();}}',
++ 'org/thunderdog/challegram/telegram/TdlibManager.java': 'package org.thunderdog.challegram.telegram;public class TdlibManager {public static Tdlib current;public static Tdlib getTdlib(int id){return current;}}',
++ 'androidx/annotation/NonNull.java': 'package androidx.annotation;public @interface NonNull {}',
++ 'androidx/work/NetworkType.java': 'package androidx.work;public enum NetworkType {CONNECTED}',
++ 'androidx/work/ExistingWorkPolicy.java': 'package androidx.work;public enum ExistingWorkPolicy {KEEP}',
++ 'androidx/work/Constraints.java': 'package androidx.work;public class Constraints {public static class Builder {public Builder setRequiredNetworkType(NetworkType n){return this;}public Constraints build(){return new Constraints();}}}',
++ 'androidx/work/Data.java': '''package androidx.work;import java.util.*;public class Data {Map<String,Long> m=new HashMap<>();public int getInt(String k,int d){return (int)getLong(k,d);}public long getLong(String k,long d){return m.getOrDefault(k,d);}public static class Builder {Data d=new Data();public Builder putInt(String k,int v){d.m.put(k,(long)v);return this;}public Builder putLong(String k,long v){d.m.put(k,v);return this;}public Data build(){return d;}}}''',
++ 'androidx/work/OneTimeWorkRequest.java': '''package androidx.work;import java.util.concurrent.TimeUnit;public class OneTimeWorkRequest {public Data data;public long delay;public static class Builder {OneTimeWorkRequest r=new OneTimeWorkRequest();public Builder(Class<?> c){}public Builder setConstraints(Constraints c){return this;}public Builder setInitialDelay(long delay,TimeUnit unit){r.delay=unit.toMillis(delay);return this;}public Builder setInputData(Data d){r.data=d;return this;}public Builder addTag(String tag){return this;}public OneTimeWorkRequest build(){return r;}}}''',
++ 'androidx/work/WorkManager.java': '''package androidx.work;import java.util.*;public class WorkManager {public static final WorkManager INSTANCE=new WorkManager();public List<OneTimeWorkRequest> scheduled=new ArrayList<>();public static WorkManager getInstance(android.content.Context c){return INSTANCE;}public void enqueueUniqueWork(String n,ExistingWorkPolicy p,OneTimeWorkRequest r){scheduled.add(r);}public void cancelAllWorkByTag(String tag){}}''',
++ 'androidx/work/WorkerParameters.java': 'package androidx.work;public class WorkerParameters {}',
++ 'androidx/work/Worker.java': '''package androidx.work;public abstract class Worker {public Worker(android.content.Context c,WorkerParameters p){}public abstract Result doWork();public Data getInputData(){return new Data();}public boolean isStopped(){return false;}public void onStopped(){}public static class Result {public static Result success(){return new Result();}}}''',
++ 'AutoForwardTest.java': '''import java.util.*;import org.drinkless.tdlib.TdApi;import org.thunderdog.challegram.telegram.*;import org.thunderdog.challegram.tool.UI;import androidx.work.*;import org.thunderdog.challegram.unsorted.Settings;
++public class AutoForwardTest {
++ static void check(boolean v,String label){if(!v)throw new AssertionError(label);}
++ static void run(Tdlib td,OneTimeWorkRequest request,List<Boolean> done){TdlibManager.current=td;SavedAutoForward.run(td.id(),request.data.getLong("token",0),request.data.getLong("due",0),()->done.add(true));}
++ static void latest(Tdlib td,long id){TdApi.Message m=new TdApi.Message();m.id=id;m.chatId=999;TdApi.Messages page=new TdApi.Messages();page.messages=new TdApi.Message[]{m};td.reply.onResult(page);}
++ static void delivered(Tdlib td,long chat){TdApi.Message m=new TdApi.Message();m.id=20;m.chatId=chat;td.reply.onResult(m);}
++ public static void main(String[] args){
++  Tdlib td=new Tdlib();td.account=71;List<Boolean> done=new ArrayList<>();WorkManager wm=WorkManager.INSTANCE;
++  check(SavedAutoForward.start(td,new long[]{999},false,false,false)!=null,"self recipient excluded");
++  check(SavedAutoForward.start(td,new long[]{100,101,100},false,true,true)==null,"start deduplicated recipients");
++  check(SavedAutoForward.start(td,new long[]{102},false,false,false)!=null,"second start rejected");
++  OneTimeWorkRequest first=wm.scheduled.get(0);run(td,first,done);
++  check(td.lastFunction instanceof TdApi.GetChatHistory,"fetch fresh Saved message each cycle");latest(td,123);
++  TdApi.ForwardMessages f=(TdApi.ForwardMessages)td.lastFunction;
++  check(f.messageIds[0]==123&&f.fromChatId==999&&f.sendCopy&&f.removeCaption&&f.options.disableNotification&&f.options.paidMessageStarCount==0,"latest id and options preserved");
++  List<Boolean> duplicate=new ArrayList<>();run(td,first,duplicate);check(duplicate.size()==1&&td.sends==2,"duplicate worker cannot send twice");
++  delivered(td,100);check(wm.scheduled.size()==1&&done.isEmpty(),"no delay scheduled before whole queue completes");
++  UI.timers.remove(0).run();delivered(td,101);
++  check(done.size()==1&&wm.scheduled.size()==2,"next work after final acknowledgement");
++  check(wm.scheduled.get(1).delay>=299000&&wm.scheduled.get(1).delay<=300000,"five minutes after completion");
++  // Run the next work manually: the WorkManager double does not advance a real clock.
++  run(td,wm.scheduled.get(1),done);latest(td,456);
++  check(((TdApi.ForwardMessages)td.lastFunction).messageIds[0]==456,"next cycle selects NEW latest message");
++  SavedAutoForward.stop(td);check(!SavedAutoForward.enabled(td)&&td.refs==0&&UI.timers.isEmpty(),"stop cancels owned queue and timer");
++  OneTimeWorkRequest obsolete=wm.scheduled.get(1);
++  check(SavedAutoForward.start(td,new long[]{100},false,false,false)==null,"restart after stop");
++  run(td,wm.scheduled.get(wm.scheduled.size()-1),done);latest(td,457);
++  SavedAutoForward.interrupt(td.id(),obsolete.data.getLong("token",0),obsolete.data.getLong("due",0));
++  check(SavedAutoForward.enabled(td)&&td.refs==1,"obsolete worker cannot cancel new cycle");
++  SavedAutoForward.stop(td);
++  check(FolderForwardTask.start(td,List.of(new FolderForwardTask.Batch(100,List.of(new TdApi.SendMessage()))))==null,"manual queue starts");
++  SavedAutoForward.stop(td);check(td.refs==1&&td.listener!=null,"auto stop does not cancel manual queue");delivered(td,100);
++  Tdlib td2=new Tdlib();td2.account=72;check(SavedAutoForward.start(td2,new long[]{100},false,false,false)==null,"other account");
++  run(td2,wm.scheduled.get(wm.scheduled.size()-1),done);latest(td2,789);int count=wm.scheduled.size();
++  td2.reply.onResult(new TdApi.Error(429,"FLOOD_WAIT_30"));check(!SavedAutoForward.enabled(td2)&&wm.scheduled.size()==count,"error stops without replay");
++  Tdlib td3=new Tdlib();td3.account=73;SavedAutoForward.start(td3,new long[]{100},false,false,false);
++  OneTimeWorkRequest interrupted=wm.scheduled.get(wm.scheduled.size()-1);
++  long[] state=Settings.instance().getLongArray("sviri_auto_forward_v1_73");state[2]=2;Settings.instance().putLongArray("sviri_auto_forward_v1_73",state);
++  run(td3,interrupted,done);check(td3.sends==0&&!SavedAutoForward.enabled(td3),"interrupted persisted batch never replays");
++  Tdlib td4=new Tdlib();td4.account=74;SavedAutoForward.start(td4,new long[]{100},false,false,false);td4.selfId=888;
++  run(td4,wm.scheduled.get(wm.scheduled.size()-1),done);check(td4.sends==0,"account identity checked");
++  System.out.println("PASS: actual auto-forward controller/worker compile; latest Saved message per cycle, delay after whole queue, deduplication, options, stop, errors, account isolation and no interrupted replay");
++ }
++}''',
++})
++for relative in ('telegram/SavedAutoForward.java', 'telegram/FolderForwardTask.java', 'sync/SavedAutoForwardWorker.java'):
++    files['org/thunderdog/challegram/' + relative] = (root / 'app/src/main/java/org/thunderdog/challegram' / relative).read_text()
++with tempfile.TemporaryDirectory() as directory:
++    target = Path(directory)
++    for relative, content in files.items():
++        path = target / relative
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(content)
++    subprocess.run(['java', '-Xmx1g', 'com.sun.tools.javac.Main', '-d', directory, *[str(target / name) for name in files]], check=True)
++    subprocess.run(['java', '-cp', directory, 'AutoForwardTest'], check=True)
 diff --git a/tests/sviri/check_folder_sender.py b/tests/sviri/check_folder_sender.py
 new file mode 100644
 index 0000000..86be2c5
@@ -5083,6 +5357,83 @@ index 0000000..3ca51ef
 +        path.write_text(content)
 +    subprocess.run(['java', '-Xmx1g', 'com.sun.tools.javac.Main', '-d', str(temp), *[str(temp / name) for name in files]], check=True)
 +    subprocess.run(['java', '-cp', str(temp), 'org.thunderdog.challegram.ui.GiftFlowTest'], check=True)
+diff --git a/tests/sviri/check_lazy_startup.py b/tests/sviri/check_lazy_startup.py
+new file mode 100644
+index 0000000..984ff13
+--- /dev/null
++++ b/tests/sviri/check_lazy_startup.py
+@@ -0,0 +1,71 @@
++#!/usr/bin/env python3
++"""Exercise the actual startup method without Android or network access."""
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++root = Path(__file__).resolve().parents[2]
++path = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java'
++code = path.read_text(encoding='utf-8')
++start = code.index('  private void onPerformStartup () {')
++brace = code.index('{', start)
++depth = 1
++end = brace + 1
++while depth:
++    depth += (code[end] == '{') - (code[end] == '}')
++    end += 1
++method = code[start:end]
++source = '''import java.util.*;
++public class LazyStartupTest {
++  boolean startupPerformed;
++  int priorityWarmupGeneration, notifications, counterRefreshes;
++  long[] hidden = {};
++  final List<Long> requests = new ArrayList<>();
++  final List<Boolean> startupEvents = new ArrayList<>();
++  int accountId = 1;
++  static class Log { static void i(String format, Object... args) {} }
++  static class TdApi { static class GetChat { long id; GetChat(long id) {this.id=id;} } }
++  static class ChatId { static boolean isUserChat(long id) {return id > 0;} }
++  static class ChatPosition { static final int CHAT_LIST_MAIN=1, CHAT_LIST_ARCHIVE=2; }
++  LazyStartupTest settings() {return this;}
++  LazyStartupTest listeners() {return this;}
++  void performStartup(boolean repeated) { notifications++; startupEvents.add(repeated); }
++  long[] hiddenChatIds() {return hidden;}
++  long[] priorityChatIds() { throw new AssertionError("startup reads entire priority index"); }
++  Object chat(long id) {return id == 11 ? new Object() : null;}
++  void send(TdApi.GetChat request, java.util.function.BiConsumer<Object,Object> reply) {
++    requests.add(request.id);
++    reply.accept(new Object(), request.id == 13 ? new Object() : null);
++  }
++  void refreshLocalVisibilityCounters() { counterRefreshes++; }
++  void restorePriorityChats(long[] ids, int offset, int generation) {throw new AssertionError("eager restore");}
++  int chatList(int list) {throw new AssertionError("startup opens chat lists");}
++  void discoverPriorityChats(int list, int generation) {throw new AssertionError("eager discovery");}
++  void runOnTdlibThread(Runnable task, double delay, boolean ref) {throw new AssertionError("startup schedules eager discovery");}
++''' + method + '''
++  static void check(boolean value, String label) {if (!value) throw new AssertionError(label);}
++  public static void main(String[] args) {
++    LazyStartupTest empty = new LazyStartupTest();
++    empty.onPerformStartup();
++    check(empty.startupPerformed && empty.requests.isEmpty(), "no eager requests without hidden chats");
++    check(empty.startupEvents.equals(List.of(false)), "first startup listener");
++    LazyStartupTest hidden = new LazyStartupTest();
++    hidden.hidden = new long[]{11,12,13};
++    hidden.onPerformStartup();
++    check(hidden.requests.equals(List.of(12L,13L)), "only missing hidden metadata requested");
++    check(hidden.counterRefreshes == 1, "refresh counters only on successful hidden lookup");
++    hidden.onPerformStartup();
++    check(hidden.requests.size() == 2 && hidden.startupEvents.equals(List.of(false,true)), "repeat startup does not requeue lookups");
++    hidden.startupPerformed = false;
++    hidden.onPerformStartup();
++    check(hidden.requests.size() == 4 && hidden.counterRefreshes == 2, "new startup restores privacy metadata");
++    System.out.println("PASS: lazy startup: no full-list/archive scan or priority restore; hidden counters, lookup errors and repeated startup preserved");
++  }
++}
++'''
++with tempfile.TemporaryDirectory() as directory:
++    target = Path(directory) / 'LazyStartupTest.java'
++    target.write_text(source, encoding='utf-8')
++    subprocess.run(['java', 'com.sun.tools.javac.Main', '-d', directory, str(target)], check=True)
++    subprocess.run(['java', '-cp', directory, 'LazyStartupTest'], check=True)
 diff --git a/tests/sviri/check_slice.py b/tests/sviri/check_slice.py
 new file mode 100644
 index 0000000..bf05916
