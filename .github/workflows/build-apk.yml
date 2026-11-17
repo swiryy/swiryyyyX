@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: swiryyyyX-apk
+  group: swiryyyyX-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -55,9 +55,24 @@ jobs:
           git -C source fetch --depth=1 origin "$(cat UPSTREAM_COMMIT)"
           git -C source checkout --detach FETCH_HEAD
           git -C source apply --check "$GITHUB_WORKSPACE/swiryyyyX.patch"
-          git -C source apply "$GITHUB_WORKSPACE/swiryyyyX.patch"
+          git -C source apply --index "$GITHUB_WORKSPACE/swiryyyyX.patch"
           git -C source submodule update --init --recursive --depth=1 --jobs 4
           git -C source/tdlib lfs pull
+          test "$(git -C source/tdlib rev-parse HEAD)" = "1094df0caf4e5b59f6b247f8d9eb8896022cb379"
+          test "$(head -n 1 source/tdlib/version.txt)" = "c15d3f5a5de6e3ba5839822c451152e5e18bb700"
+          echo "TDLib bundle 1094df0; source c15d3f5; NDK 30.0.16248370"
+      - name: Verify chat and gift regressions
+        working-directory: source
+        run: |
+          python3 tests/sviri/run_checks.py
+          python3 tests/sviri/check_activity_inbox.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
+          python3 tests/sviri/check_slice.py
+          python3 tests/sviri/check_folder_snapshot.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
+          python3 tests/sviri/check_startup_presentation.py
+          python3 tests/sviri/check_periodic_forward.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
+          python3 tests/sviri/check_tab_width.py
+          python3 tests/sviri/check_gift_manage.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
+          python3 tests/sviri/check_gift_resale.py tdlib/src/main/java/org/drinkless/tdlib/TdApi.java
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -110,10 +125,28 @@ jobs:
           build_exit=$?
           kill "$monitor_pid" 2>/dev/null || true
           exit "$build_exit"
+      - name: Verify separate Test APK identity
+        run: |
+          python3 - <<'PYCODE'
+          import os, re, subprocess
+          from pathlib import Path
+          props = dict(line.split('=', 1) for line in Path('source/version.properties').read_text().splitlines() if '=' in line and not line.lstrip().startswith('#'))
+          aapt = Path(os.environ['ANDROID_HOME']) / 'build-tools' / props['version.build_tools'] / 'aapt'
+          apks = list(Path('source/app/build/outputs/apk').rglob('*.apk'))
+          if not apks:
+              raise SystemExit('No Test APK produced')
+          for apk in apks:
+              info = subprocess.check_output([str(aapt), 'dump', 'badging', str(apk)], text=True)
+              if not re.search(r"^package: name='ua\.swiryyyyx\.client\.test'", info, re.M):
+                  raise SystemExit('Refusing artifact: package is not the separate Test package')
+              if "application-label:'swiryyyyX Test'" not in info:
+                  raise SystemExit('Refusing artifact: Test application label missing')
+              print('Verified separate package ua.swiryyyyx.client.test; label swiryyyyX Test; file', apk.name)
+          PYCODE
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: swiryyyyX-arm64-debug
+          name: swiryyyyX-tdlib-test-arm64-debug
           path: source/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 7
